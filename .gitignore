@@ -1,0 +1,25 @@
+# Logs and checkpoints (too large for git)
+logs/
+outputs/
+*.pt
+*.tfevents.*
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+
+# Build artifacts
+*.egg-info/
+build/
+dist/
+
+# Misc
+.DS_Store
+*.log.bak

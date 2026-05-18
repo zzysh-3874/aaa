@@ -1,0 +1,560 @@
+from isaaclab.utils import configclass
+from isaaclab.sensors import RayCasterCfg, patterns
+from isaaclab.managers import EventTermCfg as EventTerm
+from isaaclab.managers import SceneEntityCfg
+from isaaclab.envs.mdp import events as isaac_events
+
+from parkour_isaaclab.envs.mdp import parkour_commands
+from parkour_isaaclab.envs import ParkourManagerBasedRLEnvCfg
+from parkour_tasks.default_cfg import CAMERA_USD_CFG, VIEWER
+
+from .parkour_mdp_cfg import (
+    CommandsCfg,
+    EventCfg,
+    PIEActionsCfg,
+    PIEBridgeGaitRewardsCfg,
+    PIEBridgeLoadFixRewardsCfg,
+    PIEBridgeRewardsCfg,
+    PIEFailureTerminalPenaltyRewardsCfg,
+    PIEGentleLoadFixRewardsCfg,
+    PIEPostureHeightRewardsCfg,
+    PIEPostureHeightWarmupRewardsCfg,
+    PIEPostureTerminalPenaltyRewardsCfg,
+    ParkourEventsCfg,
+    PIERegularizedRewardsCfg,
+    PIERewardsCfg,
+    PIETerminationsCfg,
+    PIEWarmupTerminationsCfg,
+    PieObservationsCfg,
+    StairsBeamRewardsCfg,
+    StairsOnlyRewardsCfg,
+    FlatWalkParkourCmdRewardsCfg,
+    GapOnlyRewardsCfg,
+    TerminationsCfg,
+)
+from .parkour_student_cfg import ParkourStudentSceneCfg
+
+
+FOOT_RAY_PATTERN_CFG = patterns.GridPatternCfg(
+    resolution=0.1,
+    size=(0.0, 0.0),
+    direction=(0.0, 0.0, -1.0),
+)
+
+
+@configclass
+class PIEParkourSceneCfg(ParkourStudentSceneCfg):
+    foot_scanner_fl = RayCasterCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/FL_foot",
+        ray_alignment="world",
+        pattern_cfg=FOOT_RAY_PATTERN_CFG,
+        mesh_prim_paths=["/World/ground"],
+        max_distance=5.0,
+        debug_vis=False,
+    )
+    foot_scanner_fr = RayCasterCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/FR_foot",
+        ray_alignment="world",
+        pattern_cfg=FOOT_RAY_PATTERN_CFG,
+        mesh_prim_paths=["/World/ground"],
+        max_distance=5.0,
+        debug_vis=False,
+    )
+    foot_scanner_rl = RayCasterCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/RL_foot",
+        ray_alignment="world",
+        pattern_cfg=FOOT_RAY_PATTERN_CFG,
+        mesh_prim_paths=["/World/ground"],
+        max_distance=5.0,
+        debug_vis=False,
+    )
+    foot_scanner_rr = RayCasterCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/RR_foot",
+        ray_alignment="world",
+        pattern_cfg=FOOT_RAY_PATTERN_CFG,
+        mesh_prim_paths=["/World/ground"],
+        max_distance=5.0,
+        debug_vis=False,
+    )
+
+
+@configclass
+class PIECommandsCfg:
+    """PIE command c_t = [v_x_cmd, v_y_cmd, omega_yaw_cmd]."""
+
+    base_velocity = parkour_commands.PIEVelocityCommandCfg(
+        asset_name="robot",
+        resampling_time_range=(6.0, 6.0),
+        ranges=parkour_commands.PIEVelocityCommandCfg.Ranges(
+            lin_vel_x=(0.0, 1.5),
+            lin_vel_y=(0.0, 0.0),
+            ang_vel_yaw=(-1.2, 1.2),
+        ),
+    )
+
+
+@configclass
+class PIEStableCommandsCfg:
+    """Reduced command range for early forward-walking bootstrapping."""
+
+    base_velocity = parkour_commands.PIEVelocityCommandCfg(
+        asset_name="robot",
+        resampling_time_range=(6.0, 6.0),
+        ranges=parkour_commands.PIEVelocityCommandCfg.Ranges(
+            lin_vel_x=(0.5, 1.0),
+            lin_vel_y=(0.0, 0.0),
+            ang_vel_yaw=(-0.3, 0.3),
+        ),
+    )
+
+
+@configclass
+class PIEBridgeCommandsCfg:
+    """Moderate command range for moving from stable walking to obstacle approach."""
+
+    base_velocity = parkour_commands.PIEVelocityCommandCfg(
+        asset_name="robot",
+        resampling_time_range=(6.0, 6.0),
+        ranges=parkour_commands.PIEVelocityCommandCfg.Ranges(
+            lin_vel_x=(0.3, 1.2),
+            lin_vel_y=(0.0, 0.0),
+            ang_vel_yaw=(-0.8, 0.8),
+        ),
+    )
+
+
+@configclass
+class PIEStableWarmupCommandsCfg:
+    """Narrow command range for contact-avoidance warmup."""
+
+    base_velocity = parkour_commands.PIEVelocityCommandCfg(
+        asset_name="robot",
+        resampling_time_range=(6.0, 6.0),
+        ranges=parkour_commands.PIEVelocityCommandCfg.Ranges(
+            lin_vel_x=(0.1, 0.5),
+            lin_vel_y=(0.0, 0.0),
+            ang_vel_yaw=(-0.3, 0.3),
+        ),
+    )
+
+
+@configclass
+class UnitreeGo2PIEParkourEnvCfg(ParkourManagerBasedRLEnvCfg):
+    """Default PIE task aligned with the paper-style reward and training signals."""
+
+    clip_total_reward = False
+
+    scene: PIEParkourSceneCfg = PIEParkourSceneCfg(num_envs=192, env_spacing=1.0)
+    observations: PieObservationsCfg = PieObservationsCfg()
+    actions: PIEActionsCfg = PIEActionsCfg()
+    commands: PIECommandsCfg = PIECommandsCfg()
+    rewards: PIERewardsCfg = PIERewardsCfg()
+    terminations: PIETerminationsCfg = PIETerminationsCfg()
+    parkours: ParkourEventsCfg = ParkourEventsCfg()
+    events: EventCfg = EventCfg()
+
+    def __post_init__(self):
+        self.decimation = 4
+        self.episode_length_s = 20.0
+        self.sim.dt = 0.005
+        self.sim.render_interval = self.decimation
+        self.sim.physics_material = self.scene.terrain.physics_material
+        self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**18
+        self.scene.depth_camera.update_period = self.sim.dt * self.decimation
+        self.scene.height_scanner.update_period = self.sim.dt * self.decimation
+        self.scene.foot_scanner_fl.update_period = self.sim.dt * self.decimation
+        self.scene.foot_scanner_fr.update_period = self.sim.dt * self.decimation
+        self.scene.foot_scanner_rl.update_period = self.sim.dt * self.decimation
+        self.scene.foot_scanner_rr.update_period = self.sim.dt * self.decimation
+        self.scene.contact_forces.update_period = self.sim.dt * self.decimation
+        self.scene.terrain.terrain_generator.curriculum = True
+        self.actions.joint_pos.use_delay = True
+        self.actions.joint_pos.history_length = 8
+
+
+@configclass
+class UnitreeGo2PIEParkourEnvCfg_TermFix(UnitreeGo2PIEParkourEnvCfg):
+    """Ablation B: action/feature scale fix plus split stricter terminations."""
+
+    terminations: PIETerminationsCfg = PIETerminationsCfg()
+
+
+@configclass
+class UnitreeGo2PIEParkourEnvCfg_FullFix(UnitreeGo2PIEParkourEnvCfg_TermFix):
+    """Ablation C: termination fix plus stronger posture/contact regularization."""
+
+    rewards: PIERegularizedRewardsCfg = PIERegularizedRewardsCfg()
+
+
+@configclass
+class UnitreeGo2PIEParkourEnvCfg_ClipReward(UnitreeGo2PIEParkourEnvCfg):
+    """Ablation D: keep PIE terms but clip negative total reward to avoid early-death incentives."""
+
+    clip_total_reward = True
+
+
+@configclass
+class UnitreeGo2PIEParkourEnvCfg_TerminalPenalty(UnitreeGo2PIEParkourEnvCfg):
+    """Ablation E: preserve reward signs but penalize failure terminations once."""
+
+    rewards: PIEFailureTerminalPenaltyRewardsCfg = PIEFailureTerminalPenaltyRewardsCfg()
+
+
+@configclass
+class UnitreeGo2PIEParkourEnvCfg_StableEasy(UnitreeGo2PIEParkourEnvCfg):
+    """Ablation F: easier initial curriculum plus stronger posture-stability signals."""
+
+    commands: PIEStableCommandsCfg = PIEStableCommandsCfg()
+    rewards: PIEPostureTerminalPenaltyRewardsCfg = PIEPostureTerminalPenaltyRewardsCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.terrain.max_init_terrain_level = 0
+        terrain_generator = self.scene.terrain.terrain_generator
+        if terrain_generator is not None:
+            terrain_generator.difficulty_range = (0.0, 0.6)
+            for key, sub_terrain in terrain_generator.sub_terrains.items():
+                if key in ("parkour_flat", "parkour_demo"):
+                    sub_terrain.proportion = 0.3
+                else:
+                    sub_terrain.proportion = 0.1
+                if hasattr(sub_terrain, "apply_roughness"):
+                    sub_terrain.apply_roughness = False
+                if hasattr(sub_terrain, "noise_range"):
+                    sub_terrain.noise_range = (0.0, 0.0)
+        self.events.randomize_rigid_body_mass = None
+        self.events.randomize_rigid_body_com = None
+        self.events.push_by_setting_velocity = None
+
+
+@configclass
+class UnitreeGo2PIEParkourEnvCfg_StableEasyHeight(UnitreeGo2PIEParkourEnvCfg_StableEasy):
+    """Ablation G: stable easy curriculum plus explicit base-height stabilization."""
+
+    rewards: PIEPostureHeightRewardsCfg = PIEPostureHeightRewardsCfg()
+
+
+@configclass
+class UnitreeGo2PIEParkourEnvCfg_StableEasyHeightGentleLoadFix(UnitreeGo2PIEParkourEnvCfg_StableEasyHeight):
+    """Gentle warmup with a minimum long-term load-share constraint."""
+
+    rewards: PIEGentleLoadFixRewardsCfg = PIEGentleLoadFixRewardsCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        # Make the commands omnidirectional so the policy cannot consistently
+        # leave one hind leg idle; forward-only commands biased the gait toward
+        # "front-leg propulsion + rear-leg drag" which we observed as RR dragging.
+        self.commands.base_velocity.ranges.lin_vel_x = (-0.5, 1.5)
+        self.commands.base_velocity.ranges.lin_vel_y = (-0.5, 0.5)
+        self.commands.base_velocity.ranges.ang_vel_yaw = (-1.0, 1.0)
+        # Re-enable periodic pushes. The parent StableEasy class disabled
+        # push_by_setting_velocity; we turn it back on with modest ±0.5 m/s
+        # velocity perturbations every 8 s so three-legged gaits get knocked
+        # off balance during training.
+        self.events.push_by_setting_velocity = EventTerm(
+            func=isaac_events.push_by_setting_velocity,
+            params={"velocity_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5)}},
+            interval_range_s=(8.0, 8.0),
+            is_global_time=True,
+            mode="interval",
+        )
+
+
+@configclass
+class UnitreeGo2PIEFlatWalkEnvCfg(UnitreeGo2PIEParkourEnvCfg_StableEasyHeightGentleLoadFix):
+    """Pure flat-ground walking task for gait bootstrapping."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.terrain.max_init_terrain_level = 0
+        terrain_generator = self.scene.terrain.terrain_generator
+        if terrain_generator is not None:
+            terrain_generator.curriculum = False
+            terrain_generator.random_difficulty = False
+            terrain_generator.difficulty_range = (0.0, 0.0)
+            for key, sub_terrain in terrain_generator.sub_terrains.items():
+                sub_terrain.proportion = 1.0 if key == "parkour_flat" else 0.0
+                if hasattr(sub_terrain, "apply_roughness"):
+                    sub_terrain.apply_roughness = False
+                if hasattr(sub_terrain, "noise_range"):
+                    sub_terrain.noise_range = (0.0, 0.0)
+        # Simplify the task to a pure forward-walking baseline: no reverse, no
+        # sidestep, no external pushes. Small yaw range keeps turning trainable.
+        self.commands.base_velocity.ranges.lin_vel_x = (0.0, 1.0)
+        self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
+        self.commands.base_velocity.ranges.ang_vel_yaw = (-0.3, 0.3)
+        self.events.push_by_setting_velocity = None
+        # Enable visualization markers so play shows the command arrow / goal.
+        self.commands.base_velocity.debug_vis = True
+        # parkour goal marker is NOT wired to the command signal in this
+        # flat-walk task (command is sampled from uniform ranges), so leaving
+        # the goal marker on makes it look like the robot is ignoring the
+        # blue sphere. Keep it off so the only visual is the velocity arrow.
+        self.parkours.base_parkour.debug_vis = False
+
+
+@configclass
+class UnitreeGo2PIEStairsBeamEnvCfg(UnitreeGo2PIEFlatWalkEnvCfg):
+    """Stairs + balance-beam parkour built on top of the FlatWalk reward stack.
+
+    Uses PIEVelocityCommandCfg (fixed forward velocity, no heading mode).
+    The policy decides HOW to traverse obstacles purely from depth + proprio;
+    the only external signal is "go forward at vx m/s".
+    """
+
+    rewards: StairsBeamRewardsCfg = StairsBeamRewardsCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        # Swap in the stairs+beam terrain generator.
+        from parkour_isaaclab.terrains.extreme_parkour.config.stairs_beam import (
+            STAIRS_BEAM_TERRAINS_CFG,
+        )
+        self.scene.terrain.terrain_generator = STAIRS_BEAM_TERRAINS_CFG
+        self.scene.terrain.max_init_terrain_level = 0
+        terrain_generator = self.scene.terrain.terrain_generator
+        if terrain_generator is not None:
+            terrain_generator.curriculum = True
+            terrain_generator.difficulty_range = (0.0, 1.0)
+            terrain_generator.random_difficulty = False
+        # Pure forward velocity command. No heading mode, no goal-based
+        # direction. The terrain is a straight line so "go forward" is all
+        # the policy needs; it learns obstacle traversal from depth vision.
+        self.commands.base_velocity.ranges.lin_vel_x = (0.5, 1.0)
+        self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
+        self.commands.base_velocity.ranges.ang_vel_yaw = (0.0, 0.0)
+        self.commands.base_velocity.debug_vis = True
+        self.parkours.base_parkour.debug_vis = True
+        self.parkours.base_parkour.num_future_goal_obs = 6
+        # Enable ray caster visualization during play so you can see the
+        # depth scan pattern projected onto the terrain.
+        self.scene.depth_camera.debug_vis = True
+        # Relax illegal_body_contact to only terminate on base/head contact.
+        self.terminations.illegal_body_contact.params["sensor_cfg"] = SceneEntityCfg(
+            "contact_forces",
+            body_names=["base", "Head_upper", "Head_lower"],
+        )
+
+
+@configclass
+class UnitreeGo2PIEStairsOnlyEnvCfg(UnitreeGo2PIEFlatWalkEnvCfg):
+    """Pure staircase task on an IsaacLab-style inverted pyramid (bowl).
+
+    The robot spawns at the centre of the bowl (lowest plateau) and must
+    climb up the concentric stair rings in any direction. Rewards are the
+    StairsOnly minimal set; no goal markers are displayed during play.
+    Only base_contact terminates (fell over).
+    """
+
+    rewards: StairsOnlyRewardsCfg = StairsOnlyRewardsCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        from parkour_isaaclab.terrains.extreme_parkour.config.stairs_only import (
+            STAIRS_ONLY_TERRAINS_CFG,
+        )
+        self.scene.terrain.terrain_generator = STAIRS_ONLY_TERRAINS_CFG
+        self.scene.terrain.max_init_terrain_level = 0
+        # Forward velocity command only.
+        self.commands.base_velocity.ranges.lin_vel_x = (0.5, 1.0)
+        self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
+        self.commands.base_velocity.ranges.ang_vel_yaw = (0.0, 0.0)
+        self.commands.base_velocity.debug_vis = True
+        # Hide goal markers — the bowl has no meaningful waypoints; the
+        # policy just needs to climb out.
+        self.parkours.base_parkour.debug_vis = False
+        self.parkours.base_parkour.num_future_goal_obs = 6
+        # Minimal terminations: only base contact (fell over).
+        # Remove low_base_height and bad_base_orientation — both are normal
+        # during stair climbing.
+        self.terminations.low_base_height = None
+        self.terminations.bad_base_orientation = None
+        self.terminations.illegal_body_contact.params["sensor_cfg"] = SceneEntityCfg(
+            "contact_forces",
+            body_names=["base"],
+        )
+        self.terminations.illegal_body_contact.params["threshold"] = 1.0
+        # Enable depth camera visualization for play.
+        self.scene.depth_camera.debug_vis = True
+
+
+@configclass
+class UnitreeGo2PIEGapOnlyEnvCfg(UnitreeGo2PIEFlatWalkEnvCfg):
+    """Gap-crossing corridor task.
+
+    Straight corridor with random-width gaps. Forces vision dependence:
+    the policy must detect gaps from depth and jump or adjust stride.
+    Uses ParkourCommand (heading control) like the teacher so the robot
+    automatically turns toward the next goal.
+    """
+
+    rewards: GapOnlyRewardsCfg = GapOnlyRewardsCfg()
+    # Match the teacher: a single combined termination (time_out OR
+    # roll/pitch>1.5 rad OR root_z<-0.25 OR all goals reached).
+    terminations: TerminationsCfg = TerminationsCfg()
+    # Use teacher-style heading command instead of PIEVelocityCommand.
+    commands: CommandsCfg = CommandsCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        from parkour_isaaclab.terrains.extreme_parkour.config.gap_only import (
+            GAP_ONLY_TERRAINS_CFG,
+        )
+        self.scene.terrain.terrain_generator = GAP_ONLY_TERRAINS_CFG
+        self.scene.terrain.max_init_terrain_level = 0
+        # Shorter episode: 1 gap only, 15s is plenty (10m corridor at 0.7 m/s).
+        self.episode_length_s = 15.0
+        # ParkourCommand heading control: heading=0 means "face forward".
+        self.commands.base_velocity.ranges.lin_vel_x = (0.5, 1.0)
+        self.commands.base_velocity.ranges.heading = (0.0, 0.0)
+        self.commands.base_velocity.heading_control_stiffness = 0.8
+        self.commands.base_velocity.clips.lin_vel_clip = 0.2
+        self.commands.base_velocity.clips.ang_vel_clip = 0.4
+        self.commands.base_velocity.debug_vis = True
+        self.parkours.base_parkour.debug_vis = True
+        self.parkours.base_parkour.num_future_goal_obs = 6
+        # Enable depth camera visualization for play.
+        self.scene.depth_camera.debug_vis = True
+
+
+@configclass
+class UnitreeGo2PIEFlatWalkParkourCmdEnvCfg(UnitreeGo2PIEFlatWalkEnvCfg):
+    """Flat-ground walking task with ParkourCommand heading control.
+
+    Bootstrap step before GapOnly: lets the walking policy adapt to the
+    ParkourCommand command system (dynamic omega_yaw from heading error)
+    on safe flat terrain before facing gaps.
+    """
+
+    rewards: FlatWalkParkourCmdRewardsCfg = FlatWalkParkourCmdRewardsCfg()
+    terminations: TerminationsCfg = TerminationsCfg()
+    commands: CommandsCfg = CommandsCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        # Same ParkourCommand setup as GapOnly, just on flat terrain so the
+        # policy can focus on heading tracking without gap obstacles.
+        self.commands.base_velocity.ranges.lin_vel_x = (0.5, 1.0)
+        self.commands.base_velocity.ranges.heading = (0.0, 0.0)
+        self.commands.base_velocity.heading_control_stiffness = 0.8
+        self.commands.base_velocity.clips.lin_vel_clip = 0.2
+        self.commands.base_velocity.clips.ang_vel_clip = 0.4
+        self.commands.base_velocity.debug_vis = True
+        self.parkours.base_parkour.debug_vis = False
+
+
+@configclass
+class UnitreeGo2PIEParkourEnvCfg_StableEasyHeightBridge(UnitreeGo2PIEParkourEnvCfg_StableEasy):
+    """Bridge curriculum after Gentle warmup: faster commands and less height shaping."""
+
+    commands: PIEBridgeCommandsCfg = PIEBridgeCommandsCfg()
+    rewards: PIEBridgeRewardsCfg = PIEBridgeRewardsCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        terrain_generator = self.scene.terrain.terrain_generator
+        if terrain_generator is not None:
+            terrain_generator.difficulty_range = (0.0, 0.8)
+            for key, sub_terrain in terrain_generator.sub_terrains.items():
+                if key == "parkour_flat":
+                    sub_terrain.proportion = 0.15
+                elif key == "parkour_demo":
+                    sub_terrain.proportion = 0.05
+                else:
+                    sub_terrain.proportion = 0.2
+
+
+@configclass
+class UnitreeGo2PIEParkourEnvCfg_StableEasyHeightBridgeLoadFix(UnitreeGo2PIEParkourEnvCfg_StableEasyHeightBridge):
+    """Bridge curriculum with a minimum long-term load-share constraint."""
+
+    rewards: PIEBridgeLoadFixRewardsCfg = PIEBridgeLoadFixRewardsCfg()
+
+
+@configclass
+class UnitreeGo2PIEParkourEnvCfg_StableEasyHeightBridgeGaitFix(UnitreeGo2PIEParkourEnvCfg_StableEasyHeightBridge):
+    """Bridge curriculum with light four-foot usage regularization."""
+
+    rewards: PIEBridgeGaitRewardsCfg = PIEBridgeGaitRewardsCfg()
+
+
+@configclass
+class UnitreeGo2PIEParkourEnvCfg_StableWarmup(UnitreeGo2PIEParkourEnvCfg):
+    """Ablation H: easy curriculum with posture/height termination and contact reward shaping."""
+
+    commands: PIEStableWarmupCommandsCfg = PIEStableWarmupCommandsCfg()
+    rewards: PIEPostureHeightWarmupRewardsCfg = PIEPostureHeightWarmupRewardsCfg()
+    terminations: PIEWarmupTerminationsCfg = PIEWarmupTerminationsCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.terrain.max_init_terrain_level = 0
+        terrain_generator = self.scene.terrain.terrain_generator
+        if terrain_generator is not None:
+            terrain_generator.difficulty_range = (0.0, 0.3)
+            for key, sub_terrain in terrain_generator.sub_terrains.items():
+                if key in ("parkour_flat", "parkour_demo"):
+                    sub_terrain.proportion = 0.4
+                else:
+                    sub_terrain.proportion = 0.05
+                if hasattr(sub_terrain, "apply_roughness"):
+                    sub_terrain.apply_roughness = False
+                if hasattr(sub_terrain, "noise_range"):
+                    sub_terrain.noise_range = (0.0, 0.0)
+        self.events.randomize_rigid_body_mass = None
+        self.events.randomize_rigid_body_com = None
+        self.events.push_by_setting_velocity = None
+
+
+@configclass
+class UnitreeGo2PIEParkourEnvCfg_EVAL(UnitreeGo2PIEParkourEnvCfg):
+    viewer = VIEWER
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 256
+        self.episode_length_s = 20.0
+        self.scene.depth_camera_usd = CAMERA_USD_CFG
+        self.scene.terrain.max_init_terrain_level = None
+        self.commands.base_velocity.debug_vis = True
+        self.commands.base_velocity.resampling_time_range = (60.0, 60.0)
+        self.parkours.base_parkour.debug_vis = True
+        if self.scene.terrain.terrain_generator is not None:
+            self.scene.terrain.terrain_generator.num_rows = 5
+            self.scene.terrain.terrain_generator.num_cols = 5
+            self.scene.terrain.terrain_generator.random_difficulty = True
+            self.scene.terrain.terrain_generator.difficulty_range = (0.0, 1.0)
+            for key, sub_terrain in self.scene.terrain.terrain_generator.sub_terrains.items():
+                if key in ("parkour_flat", "parkour_demo"):
+                    sub_terrain.proportion = 0.0
+                else:
+                    sub_terrain.proportion = 0.25
+                    sub_terrain.noise_range = (0.02, 0.02)
+        self.events.randomize_rigid_body_com = None
+        self.events.randomize_rigid_body_mass = None
+        if self.events.push_by_setting_velocity is not None:
+            self.events.push_by_setting_velocity.interval_range_s = (6.0, 6.0)
+
+
+@configclass
+class UnitreeGo2PIEParkourEnvCfg_PLAY(UnitreeGo2PIEParkourEnvCfg):
+    viewer = VIEWER
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 16
+        self.episode_length_s = 60.0
+        self.scene.depth_camera_usd = CAMERA_USD_CFG
+        self.scene.terrain.max_init_terrain_level = None
+        self.commands.base_velocity.debug_vis = True
+        self.parkours.base_parkour.debug_vis = True
+        if self.scene.terrain.terrain_generator is not None:
+            self.scene.terrain.terrain_generator.difficulty_range = (0.7, 1.0)
+        self.events.push_by_setting_velocity = None
+        for key, sub_terrain in self.scene.terrain.terrain_generator.sub_terrains.items():
+            if key == "parkour_flat":
+                sub_terrain.proportion = 0.0
+            else:
+                sub_terrain.proportion = 0.25
+                sub_terrain.noise_range = (0.02, 0.02)
