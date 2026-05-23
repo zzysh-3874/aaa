@@ -242,6 +242,7 @@ def reward_lin_vel_xy_command_tracking(
     error = command[:, :2] - asset.data.root_lin_vel_b[:, :2]
     return torch.exp(-4.0 * torch.sum(torch.square(error), dim=1))
 
+
 def reward_ang_vel_yaw_command_tracking(
     env: ParkourManagerBasedRLEnv,
     command_name: str = "base_velocity",
@@ -272,6 +273,45 @@ def reward_joint_power(
 ) -> torch.Tensor:
     asset: Articulation = env.scene[asset_cfg.name]
     return torch.sum(torch.abs(asset.data.applied_torque) * torch.abs(asset.data.joint_vel), dim=1)
+
+
+def reward_joint_power_gap_aware(
+    env: ParkourManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    parkour_name: str = "base_parkour",
+    in_zone_scale: float = 0.25,
+) -> torch.Tensor:
+    """Joint power with the per-env penalty scaled down inside the gap zone.
+
+    Returns ``Σ|τ_i|·|q̇_i| * scale`` per env, where ``scale`` is
+    ``in_zone_scale`` (default 0.25) when the env is currently inside a
+    padded gap zone (i.e. about to or just crossed a gap), and ``1.0``
+    otherwise. With the default in_zone_scale=0.25 and a Reward weight of
+    ``-8e-5``, the effective per-step joint-power penalty becomes:
+        in zone : -8e-5 * 0.25 = -2e-5  (legacy gap-friendly value)
+        out zone: -8e-5 * 1.00 = -8e-5  (4x stronger to discourage the
+                                          jump-everywhere "v9" gait on
+                                          flat ground / between gaps)
+
+    The sub-terrain frame x is read from ``ParkourEvent.is_in_gap_zone``;
+    parkour_flat tiles always return False so this reduces to the legacy
+    ``-8e-5 * power`` everywhere on flat sub-terrains.
+    """
+    from parkour_isaaclab.envs.mdp.parkours import ParkourEvent
+
+    asset: Articulation = env.scene[asset_cfg.name]
+    parkour_event: ParkourEvent = env.parkour_manager.get_term(parkour_name)
+    power = torch.sum(
+        torch.abs(asset.data.applied_torque) * torch.abs(asset.data.joint_vel),
+        dim=1,
+    )
+    in_zone = parkour_event.is_in_gap_zone()
+    scale = torch.where(
+        in_zone,
+        torch.full_like(power, in_zone_scale),
+        torch.ones_like(power),
+    )
+    return power * scale
 
 def reward_action_rate_squared(
     env: ParkourManagerBasedRLEnv,
@@ -533,6 +573,7 @@ def reward_tracking_yaw(
     yaw = torch.atan2(2*(q[:,0]*q[:,3] + q[:,1]*q[:,2]),
                     1 - 2*(q[:,2]**2 + q[:,3]**2))
     return torch.exp(-torch.abs((parkour_event.target_yaw - yaw)))
+
 
 class reward_delta_torques(ManagerTermBase):
     def __init__(self, cfg: RewardTermCfg, env: ParkourManagerBasedRLEnv):

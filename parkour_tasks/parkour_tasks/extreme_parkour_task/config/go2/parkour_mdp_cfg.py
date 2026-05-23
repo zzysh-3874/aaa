@@ -1033,10 +1033,21 @@ class GapOnlyRewardsCfg:
         weight=-0.01,
         params={"asset_cfg": SceneEntityCfg("robot"), "action_name": "joint_pos"},
     )
+    # Gap-aware joint-power penalty. Outside the padded gap zone the weight
+    # is 4x stronger than the legacy -2e-5; inside the zone the function
+    # internally rescales by 0.25 so the effective penalty stays at -2e-5
+    # (matching the value v9 trained under, which DID solve gap crossing
+    # but produced a "jump-everywhere" gait on flat ground). Net effect:
+    # tighter energy budget on flat ground → encourages trot, while the
+    # gap region keeps the latitude needed for the leap.
     reward_joint_power = RewTerm(
-        func=rewards.reward_joint_power,
-        weight=-2.0e-5,
-        params={"asset_cfg": SceneEntityCfg("robot")},
+        func=rewards.reward_joint_power_gap_aware,
+        weight=-8.0e-5,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "parkour_name": "base_parkour",
+            "in_zone_scale": 0.25,
+        },
     )
     reward_collision = RewTerm(
         func=rewards.reward_collision,
@@ -1057,90 +1068,6 @@ class GapOnlyRewardsCfg:
             "asset_cfg": SceneEntityCfg(name="robot", body_names=["FL_foot", "FR_foot", "RL_foot", "RR_foot"]),
             "sensor_cfg": SceneEntityCfg(name="contact_forces", body_names=".*_foot"),
             "parkour_name": "base_parkour",
-        },
-    )
-
-
-@configclass
-class FlatWalkParkourCmdRewardsCfg(GapOnlyRewardsCfg):
-    """Flat-ground walking reward set adapted to ParkourCommand heading control.
-
-    Inherits GapOnly's goal-based rewards (tracking_goal_vel, tracking_yaw,
-    lin_vel_xy_command_tracking, etc.) and adds the walking-baseline-style
-    gait shaping rewards (feet_air_time, feet_stumble, feet_slip,
-    feet_min_force_share, no_fly, stand_still) so the policy learns a clean
-    trot at 1.5 m/s before being moved to GapOnly.
-    """
-
-    # GapOnly's reward_feet_edge is irrelevant on flat ground, disable it.
-    reward_feet_edge = None
-
-    # --- Gait shaping rewards (from PIEGentleLoadFixRewardsCfg) -----------
-    reward_feet_air_time = RewTerm(
-        func=isaac_mdp.feet_air_time,
-        weight=1.0,
-        params={
-            "command_name": "base_velocity",
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot"),
-            "threshold": 0.2,
-        },
-    )
-    reward_feet_stumble = RewTerm(
-        func=rewards.reward_feet_stumble,
-        weight=-1.0,
-        params={
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot"),
-            "horizontal_force_ratio": 4.0,
-            "min_vertical_force": 1.0,
-        },
-    )
-    reward_feet_slip = RewTerm(
-        func=rewards.reward_feet_slip,
-        weight=-1.0,
-        params={
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot"),
-            "horizontal_force_ratio": 2.0,
-            "min_vertical_force": 5.0,
-            "contact_force_threshold": 2.0,
-        },
-    )
-    reward_feet_min_force_share = RewTerm(
-        func=rewards.reward_feet_min_force_share,
-        weight=-1.0,
-        params={
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot"),
-            "ema_alpha": 0.02,
-            "min_share": 0.15,
-            "min_total_force": 20.0,
-        },
-    )
-    reward_no_fly = RewTerm(
-        func=rewards.reward_no_fly,
-        weight=-1.0,
-        params={
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot"),
-            "contact_threshold": 1.0,
-        },
-    )
-    reward_stand_still = RewTerm(
-        func=rewards.reward_stand_still,
-        weight=-0.5,
-        params={
-            "asset_cfg": SceneEntityCfg("robot"),
-            "command_name": "base_velocity",
-            "command_threshold": 0.1,
-        },
-    )
-    # --- Base height constraint -----------------------------------------
-    # Strongly penalise the robot dropping below 0.30m. Without this the
-    # policy crouches at 1.5 m/s to maximise lin_vel_xy_command_tracking.
-    reward_base_height_below_target = RewTerm(
-        func=rewards.reward_base_height_below_target,
-        weight=-10.0,
-        params={
-            "asset_cfg": SceneEntityCfg("robot"),
-            "sensor_cfg": SceneEntityCfg("height_scanner"),
-            "target_height": 0.30,
         },
     )
 

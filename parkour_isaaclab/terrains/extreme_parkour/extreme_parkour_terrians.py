@@ -721,4 +721,15 @@ def gap_only_terrain(
     if cfg.apply_roughness:
         height_field_raw = random_uniform_terrain(difficulty, cfg, height_field_raw)
 
-    return height_field_raw, goals * hs, goal_heights
+    # Gap intervals in metres along +x of the sub-terrain (before the mesh
+    # decorator centres the mesh). Each row is [x_start_m, x_end_m]. The
+    # decorator forwards these unchanged so downstream code can build gap
+    # zones for reward masking; the values never enter the observation.
+    if len(gap_starts) > 0:
+        gap_intervals_m = np.array(
+            [(s * hs, e * hs) for s, e in gap_starts], dtype=np.float32
+        )
+    else:
+        gap_intervals_m = np.zeros((0, 2), dtype=np.float32)
+
+    return height_field_raw, goals * hs, goal_heights, gap_intervals_m

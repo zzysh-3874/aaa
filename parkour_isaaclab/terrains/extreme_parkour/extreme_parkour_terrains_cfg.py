@@ -119,12 +119,12 @@ class GapOnlyTerrainCfg(ExtremeParkourRoughTerrainCfg):
 
     function = extreme_parkour_terrians.gap_only_terrain
     # Platform parameters.
-    start_platform_len: float = 3.0  # m — short corridor before first gap
-    plat_len_min: float = 1.5  # m — fixed platform length between gaps
-    plat_len_max: float = 1.5  # m — fixed platform length between gaps
+    start_platform_len: float = 2.0  # m — corridor before first gap
+    plat_len_min: float = 1.5  # m — min platform length between gaps
+    plat_len_max: float = 2.5  # m — max platform length between gaps (randomized)
     # Gap parameters.
     gap_width_min: float = 0.05  # m — narrowest gap (5cm, trivially crossable)
     gap_width_max: str = "0.05 + 0.70 * difficulty"  # m — widest gap
     gap_depth: float = 2.0  # m — deep enough to terminate on contact
     # Number of gaps per tile.
-    num_gaps: int = 1
+    num_gaps: int = 3

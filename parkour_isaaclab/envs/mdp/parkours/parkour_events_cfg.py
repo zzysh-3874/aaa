@@ -59,6 +59,15 @@ class ParkourEventsCfg(ParkourTermCfg):
     reach_goal_delay: float = 0.1
     next_goal_threshold: float = 0.2
 
+    # Gap zone padding (metres) used by ``ParkourEvent.is_in_gap_zone``.
+    # A robot is "in the gap zone" when its sub-terrain x position lies in
+    # ``[x_start - gap_zone_pre, x_end + gap_zone_post]`` for any gap on its
+    # current tile. Reward terms can use this mask to relax constraints
+    # only near gaps. Pure flat sub-terrains have no gaps and therefore
+    # always return False.
+    gap_zone_pre: float = 0.45
+    gap_zone_post: float = 0.35
+
     future_goal_poses_visualizer_cfg: VisualizationMarkersCfg \
         = FUTURE_GOAL_MARKER_CFG.replace(prim_path="/Visuals/Command/future_goal_poses")
 

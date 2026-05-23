@@ -32,8 +32,20 @@ def parkour_field_to_mesh(func: Callable) -> Callable:
 
         cfg.size = tuple(sub_terrain_size)
         # generate the height field
-        z_gen, goals, goal_heights = func(difficulty, cfg, num_goals)
+        result = func(difficulty, cfg, num_goals)
+        # Backwards compatibility: terrain functions historically return
+        # (z_gen, goals, goal_heights). The newer gap_only_terrain also
+        # returns gap_intervals_m to support reward-zone masking. Detect
+        # which signature was used.
+        if len(result) == 4:
+            z_gen, goals, goal_heights, gap_intervals_m = result
+        else:
+            z_gen, goals, goal_heights = result
+            gap_intervals_m = np.zeros((0, 2), dtype=np.float32)
         goals -= np.array([0.5 * cfg.size[0], 0.5 * cfg.size[1]])
+        # Centre gap intervals along x (matches the goal centring above).
+        if gap_intervals_m.shape[0] > 0:
+            gap_intervals_m = gap_intervals_m - 0.5 * cfg.size[0]
         heights[border_pixels:-border_pixels, border_pixels:-border_pixels] = z_gen
         # set terrain size back to config
         # convert to trimesh
@@ -54,7 +66,7 @@ def parkour_field_to_mesh(func: Callable) -> Callable:
         y2 = int((cfg.size[1] * 0.5 + 1) / cfg.horizontal_scale)
         origin_z = np.max(heights[x1:x2, y1:y2]) * cfg.vertical_scale
         origin = np.array([0.5 * cfg.size[0], 0.5 * cfg.size[1], origin_z])
-        return [mesh], origin, goals, goal_heights, x_edge_mask
+        return [mesh], origin, goals, goal_heights, x_edge_mask, gap_intervals_m
 
     return wrapper
 

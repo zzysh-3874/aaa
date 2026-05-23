@@ -75,6 +75,21 @@ class ParkourEvent(ParkourTerm):
         self.env_per_terrain_name = self.total_terrain_names[numpy_terrain_levels, numpy_terrain_types]
         self._reset_offset = self.env.event_manager.get_term_cfg('reset_root_state').params['offset']
 
+        # Gap intervals in the sub-terrain frame, padded with NaN for unused
+        # slots. Each env's slice of (max_gaps_per_tile, 2) holds [x_start,
+        # x_end] in metres relative to the tile centre. Tiles without gaps
+        # (e.g. parkour_flat) keep all-NaN rows so ``is_in_gap_zone`` returns
+        # False for those envs by construction.
+        gap_intervals = torch.from_numpy(terrain_generator.gap_intervals).to(
+            device=self.device, dtype=torch.float
+        )
+        self.terrain_gap_intervals = gap_intervals
+        self.env_gap_intervals = self.terrain_gap_intervals[
+            self.terrain.terrain_levels, self.terrain.terrain_types
+        ].clone()
+        self.gap_zone_pre = float(cfg.gap_zone_pre)
+        self.gap_zone_post = float(cfg.gap_zone_post)
+
         robot_root_pos_w = self.robot.data.root_pos_w[:, :2] - self.env_origins[:, :2]
         self.target_pos_rel = self.cur_goals[:, :2] - robot_root_pos_w
         self.next_target_pos_rel = self.next_goals[:, :2] - robot_root_pos_w
@@ -171,6 +186,12 @@ class ParkourEvent(ParkourTerm):
         numpy_terrain_levels = self.terrain.terrain_levels.detach().cpu().numpy()
         numpy_terrain_types = self.terrain.terrain_types.detach().cpu().numpy()
         self.env_per_terrain_name = self.total_terrain_names[numpy_terrain_levels, numpy_terrain_types]
+
+        # Refresh per-env gap intervals after a terrain-level change so the
+        # gap zone mask tracks the new tile geometry.
+        self.env_gap_intervals = self.terrain_gap_intervals[
+            self.terrain.terrain_levels, self.terrain.terrain_types
+        ].clone()
 
         self.reach_goal_timer[env_ids] = 0
         self.cur_goal_idx[env_ids] = 0
@@ -282,3 +303,32 @@ class ParkourEvent(ParkourTerm):
             RuntimeError: No command is generated. Always raises this error.
         """
         raise RuntimeError("NullCommandTerm does not generate any commands.")
+
+    def is_in_gap_zone(self, positions_w: torch.Tensor | None = None) -> torch.Tensor:
+        """Whether each env's robot lies inside a gap-padded zone.
+
+        For every env, the gap zone is the union of intervals
+        ``[x_start - gap_zone_pre, x_end + gap_zone_post]`` along the +x axis
+        of its current sub-terrain. Tiles without gaps (NaN rows in
+        ``env_gap_intervals``) automatically return False.
+
+        Args:
+            positions_w: Optional ``(num_envs, 2)`` or ``(num_envs, 3)`` tensor
+                of world-frame robot positions. Defaults to the asset's
+                current root xy.
+
+        Returns:
+            Bool tensor of shape ``(num_envs,)``.
+        """
+        if positions_w is None:
+            positions_w = self.robot.data.root_pos_w[:, :2]
+        # Sub-terrain frame x: world x minus tile centre x.
+        x_local = positions_w[:, 0] - self.env_origins[:, 0]
+        x_local = x_local.unsqueeze(1)  # (num_envs, 1)
+
+        starts = self.env_gap_intervals[:, :, 0] - self.gap_zone_pre
+        ends = self.env_gap_intervals[:, :, 1] + self.gap_zone_post
+        # Compare element-wise; NaN comparisons return False so padded slots
+        # never trigger a hit.
+        in_zone = (x_local >= starts) & (x_local <= ends)
+        return in_zone.any(dim=1)

@@ -28,7 +28,6 @@ from .parkour_mdp_cfg import (
     PieObservationsCfg,
     StairsBeamRewardsCfg,
     StairsOnlyRewardsCfg,
-    FlatWalkParkourCmdRewardsCfg,
     GapOnlyRewardsCfg,
     TerminationsCfg,
 )
@@ -279,6 +278,19 @@ class UnitreeGo2PIEFlatWalkEnvCfg(UnitreeGo2PIEParkourEnvCfg_StableEasyHeightGen
                     sub_terrain.apply_roughness = False
                 if hasattr(sub_terrain, "noise_range"):
                     sub_terrain.noise_range = (0.0, 0.0)
+                # Force goals onto the centerline (y_range≈0) so that
+                # `target_yaw` for reward_tracking_yaw stays close to 0 when
+                # the robot is on-center. Otherwise the default y_range=(-0.4,
+                # 0.4) creates a goal direction that fights ParkourCommand's
+                # heading=0 instruction, and the policy learns a chronic
+                # right/left bias instead of true straight-line walking.
+                # Use (0, 0.1) instead of (0, 0) because the underlying
+                # terrain generator does np.random.randint(low, high) which
+                # rejects empty ranges; 0.1m at horizontal_scale=0.08 yields
+                # a non-zero discretised range while still keeping target_yaw
+                # well below 0.05 rad.
+                if hasattr(sub_terrain, "y_range") and key == "parkour_flat":
+                    sub_terrain.y_range = (0.0, 0.1)
         # Simplify the task to a pure forward-walking baseline: no reverse, no
         # sidestep, no external pushes. Small yaw range keeps turning trainable.
         self.commands.base_velocity.ranges.lin_vel_x = (0.0, 1.0)
@@ -403,8 +415,9 @@ class UnitreeGo2PIEGapOnlyEnvCfg(UnitreeGo2PIEFlatWalkEnvCfg):
         )
         self.scene.terrain.terrain_generator = GAP_ONLY_TERRAINS_CFG
         self.scene.terrain.max_init_terrain_level = 0
-        # Shorter episode: 1 gap only, 15s is plenty (10m corridor at 0.7 m/s).
-        self.episode_length_s = 15.0
+        # 3 gaps with ~2m spacing, 12m tile — 30s gives enough time even
+        # if the policy hesitates at each gap edge.
+        self.episode_length_s = 30.0
         # ParkourCommand heading control: heading=0 means "face forward".
         self.commands.base_velocity.ranges.lin_vel_x = (0.5, 1.0)
         self.commands.base_velocity.ranges.heading = (0.0, 0.0)
@@ -416,32 +429,6 @@ class UnitreeGo2PIEGapOnlyEnvCfg(UnitreeGo2PIEFlatWalkEnvCfg):
         self.parkours.base_parkour.num_future_goal_obs = 6
         # Enable depth camera visualization for play.
         self.scene.depth_camera.debug_vis = True
-
-
-@configclass
-class UnitreeGo2PIEFlatWalkParkourCmdEnvCfg(UnitreeGo2PIEFlatWalkEnvCfg):
-    """Flat-ground walking task with ParkourCommand heading control.
-
-    Bootstrap step before GapOnly: lets the walking policy adapt to the
-    ParkourCommand command system (dynamic omega_yaw from heading error)
-    on safe flat terrain before facing gaps.
-    """
-
-    rewards: FlatWalkParkourCmdRewardsCfg = FlatWalkParkourCmdRewardsCfg()
-    terminations: TerminationsCfg = TerminationsCfg()
-    commands: CommandsCfg = CommandsCfg()
-
-    def __post_init__(self):
-        super().__post_init__()
-        # Same ParkourCommand setup as GapOnly, just on flat terrain so the
-        # policy can focus on heading tracking without gap obstacles.
-        self.commands.base_velocity.ranges.lin_vel_x = (0.5, 1.0)
-        self.commands.base_velocity.ranges.heading = (0.0, 0.0)
-        self.commands.base_velocity.heading_control_stiffness = 0.8
-        self.commands.base_velocity.clips.lin_vel_clip = 0.2
-        self.commands.base_velocity.clips.ang_vel_clip = 0.4
-        self.commands.base_velocity.debug_vis = True
-        self.parkours.base_parkour.debug_vis = False
 
 
 @configclass
@@ -549,6 +536,14 @@ class UnitreeGo2PIEParkourEnvCfg_PLAY(UnitreeGo2PIEParkourEnvCfg):
         self.scene.terrain.max_init_terrain_level = None
         self.commands.base_velocity.debug_vis = True
         self.parkours.base_parkour.debug_vis = True
+        # Disable ray caster debug visualizations (height scanner, foot scanners,
+        # depth camera) so play doesn't render the red/green ray hit markers.
+        self.scene.height_scanner.debug_vis = False
+        self.scene.foot_scanner_fl.debug_vis = False
+        self.scene.foot_scanner_fr.debug_vis = False
+        self.scene.foot_scanner_rl.debug_vis = False
+        self.scene.foot_scanner_rr.debug_vis = False
+        self.scene.depth_camera.debug_vis = False
         if self.scene.terrain.terrain_generator is not None:
             self.scene.terrain.terrain_generator.difficulty_range = (0.7, 1.0)
         self.events.push_by_setting_velocity = None
@@ -558,3 +553,5 @@ class UnitreeGo2PIEParkourEnvCfg_PLAY(UnitreeGo2PIEParkourEnvCfg):
             else:
                 sub_terrain.proportion = 0.25
                 sub_terrain.noise_range = (0.02, 0.02)
+
+

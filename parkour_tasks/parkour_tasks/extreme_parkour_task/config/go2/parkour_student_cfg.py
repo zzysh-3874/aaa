@@ -114,6 +114,14 @@ class UnitreeGo2StudentParkourEnvCfg_PLAY(UnitreeGo2StudentParkourEnvCfg_EVAL):
         self.scene.num_envs = 16
         self.episode_length_s = 60.
 
+        # Disable ray caster debug visualization (height scanner + depth camera).
+        # Note: depth_camera debug_vis is also gated by the observation term's
+        # debug_vis param, which is re-enabled by the parent _EVAL config; turn
+        # both off here so play stays clean of ray hit markers.
+        self.scene.height_scanner.debug_vis = False
+        self.scene.depth_camera.debug_vis = False
+        self.observations.depth_camera.depth_cam.params['debug_vis'] = False
+
         if self.scene.terrain.terrain_generator is not None:
             self.scene.terrain.terrain_generator.difficulty_range = (0.7,1.0)
         self.events.push_by_setting_velocity = None

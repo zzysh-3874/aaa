@@ -252,16 +252,6 @@ gym.register(
 )
 
 gym.register(
-    id="Isaac-PIE-FlatWalkParkourCmd-Unitree-Go2-v0",
-    entry_point="parkour_isaaclab.envs:ParkourManagerBasedRLEnv",
-    disable_env_checker=True,
-    kwargs={
-        "env_cfg_entry_point": f"{__name__}.parkour_pie_cfg:UnitreeGo2PIEFlatWalkParkourCmdEnvCfg",
-        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_pie_ppo_cfg:UnitreeGo2PIEGentleLoadFixPPORunnerCfg",
-    },
-)
-
-gym.register(
     id="Isaac-PIE-Parkour-Unitree-Go2-StableEasyHeight-Bridge-v0",
     entry_point="parkour_isaaclab.envs:ParkourManagerBasedRLEnv",
     disable_env_checker=True,

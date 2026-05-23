@@ -97,6 +97,8 @@ class UnitreeGo2TeacherParkourEnvCfg_PLAY(UnitreeGo2TeacherParkourEnvCfg_EVAL):
         self.scene.num_envs = 16
         self.parkours.base_parkour.debug_vis = True
         self.commands.base_velocity.debug_vis = True
+        # Disable ray caster debug visualization (height scanner) in play.
+        self.scene.height_scanner.debug_vis = False
         if self.scene.terrain.terrain_generator is not None:
             self.scene.terrain.terrain_generator.difficulty_range = (0.7,1.0)
         self.events.push_by_setting_velocity = None
