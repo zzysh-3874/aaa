@@ -45,7 +45,7 @@ FOOT_RAY_PATTERN_CFG = patterns.GridPatternCfg(
 class PIEParkourSceneCfg(ParkourStudentSceneCfg):
     foot_scanner_fl = RayCasterCfg(
         prim_path="{ENV_REGEX_NS}/Robot/FL_foot",
-        ray_alignment="world",
+        attach_yaw_only=False,
         pattern_cfg=FOOT_RAY_PATTERN_CFG,
         mesh_prim_paths=["/World/ground"],
         max_distance=5.0,
@@ -53,7 +53,7 @@ class PIEParkourSceneCfg(ParkourStudentSceneCfg):
     )
     foot_scanner_fr = RayCasterCfg(
         prim_path="{ENV_REGEX_NS}/Robot/FR_foot",
-        ray_alignment="world",
+        attach_yaw_only=False,
         pattern_cfg=FOOT_RAY_PATTERN_CFG,
         mesh_prim_paths=["/World/ground"],
         max_distance=5.0,
@@ -61,7 +61,7 @@ class PIEParkourSceneCfg(ParkourStudentSceneCfg):
     )
     foot_scanner_rl = RayCasterCfg(
         prim_path="{ENV_REGEX_NS}/Robot/RL_foot",
-        ray_alignment="world",
+        attach_yaw_only=False,
         pattern_cfg=FOOT_RAY_PATTERN_CFG,
         mesh_prim_paths=["/World/ground"],
         max_distance=5.0,
@@ -69,7 +69,7 @@ class PIEParkourSceneCfg(ParkourStudentSceneCfg):
     )
     foot_scanner_rr = RayCasterCfg(
         prim_path="{ENV_REGEX_NS}/Robot/RR_foot",
-        ray_alignment="world",
+        attach_yaw_only=False,
         pattern_cfg=FOOT_RAY_PATTERN_CFG,
         mesh_prim_paths=["/World/ground"],
         max_distance=5.0,
