@@ -173,7 +173,7 @@ class UnitreeGo2PIEGentlePPORunnerCfg(UnitreeGo2PIEParkourPPORunnerCfg):
 class UnitreeGo2PIEGentleLoadFixPPORunnerCfg(UnitreeGo2PIEGentlePPORunnerCfg):
     """Gentle runner with full action range for long walking runs."""
 
-    save_interval = 500
+    save_interval = 2000
     clip_actions = 1.2
     policy = ParkourRslRlPIEGentleLoadFixActorCriticCfg()
 
