@@ -65,8 +65,8 @@ class ParkourEventsCfg(ParkourTermCfg):
     # current tile. Reward terms can use this mask to relax constraints
     # only near gaps. Pure flat sub-terrains have no gaps and therefore
     # always return False.
-    gap_zone_pre: float = 0.45
-    gap_zone_post: float = 0.35
+    gap_zone_pre: float = 0.30
+    gap_zone_post: float = 0.20
 
     future_goal_poses_visualizer_cfg: VisualizationMarkersCfg \
         = FUTURE_GOAL_MARKER_CFG.replace(prim_path="/Visuals/Command/future_goal_poses")
