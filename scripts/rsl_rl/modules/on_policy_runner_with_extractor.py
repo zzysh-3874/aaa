@@ -559,7 +559,27 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
 
     def load(self, path: str, load_optimizer: bool = True):
         loaded_dict = torch.load(path, weights_only=False)
-        resumed_training = self.alg.policy.load_state_dict(loaded_dict["model_state_dict"])
+        # When critic obs dim changes (e.g. asymmetric critic obs upgrade) the
+        # saved critic state_dict no longer matches the new network. Detect
+        # that case and only load the parts that still match (actor + std).
+        # The critic is reinitialised and so is the optimizer.
+        saved_model = loaded_dict["model_state_dict"]
+        try:
+            load_result = self.alg.policy.load_state_dict(saved_model, strict=True)
+            critic_compatible = True
+        except RuntimeError as e:
+            if "size mismatch" in str(e):
+                print("[WARN] critic obs dim mismatch detected. Loading actor + std only; "
+                      "critic and optimizer will be reinitialised.")
+                # Drop critic.* keys from the saved dict and load partially.
+                filtered = {k: v for k, v in saved_model.items() if not k.startswith("critic.")}
+                load_result = self.alg.policy.load_state_dict(filtered, strict=False)
+                critic_compatible = False
+            else:
+                raise
+        # SimpleActorCritic returns torch's IncompatibleKeys; ActorCriticWithEncoder
+        # returns True. Treat any non-False as a successful resume.
+        resumed_training = load_result is not False
         self.alg.estimator.load_state_dict(loaded_dict['estimator_state_dict'])
         if self.alg.rnd:
             self.alg.rnd.load_state_dict(loaded_dict["rnd_state_dict"])
@@ -582,12 +602,14 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
                 print("No saved depth actor, Copying actor critic actor to depth actor...")
                 self.alg.depth_actor.load_state_dict(self.alg.policy.actor.state_dict())
 
-        if load_optimizer and resumed_training:
+        if load_optimizer and resumed_training and critic_compatible:
             # -- algorithm optimizer
             self.alg.optimizer.load_state_dict(loaded_dict["optimizer_state_dict"])
             # -- RND optimizer if used
             if self.alg.rnd:
                 self.alg.rnd_optimizer.load_state_dict(loaded_dict["rnd_optimizer_state_dict"])
+        elif load_optimizer and resumed_training and not critic_compatible:
+            print("[WARN] Skipping optimizer state load because critic was reinitialised.")
         # -- load current learning iteration
         if resumed_training:
             self.current_learning_iteration = loaded_dict["iter"]

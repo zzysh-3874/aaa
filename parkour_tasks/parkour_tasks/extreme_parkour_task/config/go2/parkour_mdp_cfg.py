@@ -195,6 +195,7 @@ class PieObservationsCfg:
                 "command_name": "base_velocity",
                 "action_name": "joint_pos",
                 "height_sensor_cfg": SceneEntityCfg("height_scanner"),
+                "parkour_name": "base_parkour",
             },
             clip=(-100, 100),
         )
