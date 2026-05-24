@@ -149,17 +149,41 @@ def pie_proprioception(
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     command_name: str = "base_velocity",
     action_name: str = "joint_pos",
+    parkour_name: str = "base_parkour",
 ) -> torch.Tensor:
     """PIE proprioceptive observation with fixed velocity scaling.
 
-    Joint-position offset and previous action remain in their physical units;
-    command and high-variance velocity channels use fixed DreamWaQ/legged_gym
-    style scales.
+    Layout (47 dims total):
+        - root angular velocity in base frame  (3)
+        - projected gravity                    (3)
+        - velocity command (vx, vy, omega)     (3)
+        - joint position offset from default   (12)
+        - joint velocity (scaled)              (12)
+        - previous action                      (12)
+        - delta_yaw to current goal            (1)
+        - delta_yaw to next-after-current goal (1)
+
+    The delta_yaw signals are added so the actor can directly observe how
+    much the next two goal headings differ from the robot's current yaw, the
+    same lookahead the Teacher policy already enjoys. They are deployable on
+    the real robot as long as an external planner / operator provides the
+    next two waypoints.
     """
     asset: Articulation = env.scene[asset_cfg.name]
+    parkour_event: ParkourEvent = env.parkour_manager.get_term(parkour_name)
     commands = env.command_manager.get_command(command_name)
     command_scale = commands.new_tensor(PIE_COMMAND_SCALE)
     previous_action = env.action_manager.get_term(action_name).action_history_buf[:, -1]
+
+    # Robot yaw from quaternion; same convention as ExtremeParkourObservations.
+    q = asset.data.root_quat_w
+    yaw = torch.atan2(
+        2.0 * (q[:, 0] * q[:, 3] + q[:, 1] * q[:, 2]),
+        1.0 - 2.0 * (q[:, 2] ** 2 + q[:, 3] ** 2),
+    )
+    delta_yaw = wrap_to_pi(parkour_event.target_yaw - yaw).unsqueeze(-1)
+    delta_next_yaw = wrap_to_pi(parkour_event.next_target_yaw - yaw).unsqueeze(-1)
+
     return torch.cat(
         (
             asset.data.root_ang_vel_b * PIE_ANG_VEL_SCALE,
@@ -168,6 +192,8 @@ def pie_proprioception(
             asset.data.joint_pos - asset.data.default_joint_pos,
             asset.data.joint_vel * PIE_JOINT_VEL_SCALE,
             previous_action,
+            delta_yaw,
+            delta_next_yaw,
         ),
         dim=-1,
     ).to(env.device)
@@ -225,39 +251,22 @@ def pie_critic_observation(
     """PIE privileged critic observation aligned with the Teacher critic.
 
     Layout (220 dims total for default Go2 setup):
-        - proprioception            (45)  shared with actor
+        - proprioception            (47)  shared with actor (delta_yaw included)
         - base_velocity             ( 3)  ground-truth root linear velocity
         - height_scan               (132) ground-truth ray-cast heightmap
-        - delta_yaw                 (  1) angle between robot yaw and current goal
-        - delta_next_yaw            (  1) angle to the next-after-current goal
         - priv_latent.mass_params   ( 13) base mass + COM offset
         - priv_latent.friction      (  1) ground friction coefficient
         - priv_latent.stiff_offset  ( 12) (joint_stiffness/default - 1)
         - priv_latent.damp_offset   ( 12) (joint_damping/default - 1)
 
     The critic never deploys, so all of these values are pulled directly from
-    the simulation. This mirrors the Teacher policy obs which proved fast to
-    converge, while keeping the actor input strictly real-robot deployable.
+    the simulation. ``delta_yaw`` and ``delta_next_yaw`` already live inside
+    proprioception so they are not repeated here.
     """
     asset: Articulation = env.scene[asset_cfg.name]
-    parkour_event: ParkourEvent = env.parkour_manager.get_term(parkour_name)
     device = env.device
 
-    # ---- delta_yaw / delta_next_yaw ----
-    # ParkourEvent updates target_yaw / next_target_yaw every step; the robot's
-    # current yaw is computed from quaternion. wrap_to_pi keeps the diff in
-    # [-pi, pi] so the network sees a continuous signal.
-    q = asset.data.root_quat_w
-    yaw = torch.atan2(
-        2.0 * (q[:, 0] * q[:, 3] + q[:, 1] * q[:, 2]),
-        1.0 - 2.0 * (q[:, 2] ** 2 + q[:, 3] ** 2),
-    )
-    delta_yaw = wrap_to_pi(parkour_event.target_yaw - yaw)
-    delta_next_yaw = wrap_to_pi(parkour_event.next_target_yaw - yaw)
-
     # ---- priv_latent (Teacher-style mass/COM/friction/PD offsets) ----
-    # All accessed via the same articulation APIs Teacher uses. Mass params
-    # join base mass with body-COM in base frame.
     body_idx = asset.find_bodies("base")[0]
     body_mass = asset.root_physx_view.get_masses()[:, body_idx].to(device)
     body_com = asset.data.com_pos_b[:, body_idx, :].to(device).squeeze(1)
@@ -268,11 +277,15 @@ def pie_critic_observation(
 
     return torch.cat(
         (
-            pie_proprioception(env, asset_cfg=asset_cfg, command_name=command_name, action_name=action_name),
+            pie_proprioception(
+                env,
+                asset_cfg=asset_cfg,
+                command_name=command_name,
+                action_name=action_name,
+                parkour_name=parkour_name,
+            ),
             pie_base_velocity_target(env, asset_cfg=asset_cfg),
             pie_height_scan_target(env, sensor_cfg=height_sensor_cfg),
-            delta_yaw.unsqueeze(-1),
-            delta_next_yaw.unsqueeze(-1),
             mass_params,
             friction,
             stiff_offset,

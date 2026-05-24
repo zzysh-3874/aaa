@@ -147,7 +147,7 @@ class PPOWithExtractor(PPO):
         self.pie_joint_actor_estimator = bool(
             self.use_pie_actor_features and estimator_paras.get("pie_joint_actor_estimator", False)
         )
-        self.pie_policy_obs_dim = int(estimator_paras.get("pie_policy_obs_dim", 45))
+        self.pie_policy_obs_dim = int(estimator_paras.get("pie_policy_obs_dim", 47))
         self.pie_actor_estimator_grad_scale = float(estimator_paras.get("pie_actor_estimator_grad_scale", 1.0))
         self.pie_actor_rnn_hidden: torch.Tensor | None = None
         self.pie_train_gru_sequence = bool(estimator_paras.get("pie_train_gru_sequence", True))

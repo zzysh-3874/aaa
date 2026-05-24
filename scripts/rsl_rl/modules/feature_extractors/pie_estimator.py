@@ -61,7 +61,7 @@ class PIEEstimator(nn.Module):
 
     Inputs:
         depth: (B, 2, 58, 87)
-        proprioception_history: (B, 10, 45)
+        proprioception_history: (B, 10, 47)
 
     The proprio history token queries visual tokens through cross-modal attention.
     The GRU receives one fused step per forward call and carries temporal memory in its hidden state.
@@ -72,7 +72,7 @@ class PIEEstimator(nn.Module):
         self,
         depth_channels: int = 2,
         depth_image_shape: tuple[int, int] = (58, 87),
-        proprio_dim: int = 45,
+        proprio_dim: int = 47,
         proprio_history_len: int = 10,
         depth_feature_map_shape: tuple[int, int] = (6, 9),
         depth_feature_dim: int = 128,
@@ -83,7 +83,7 @@ class PIEEstimator(nn.Module):
         z_m_dim: int = 32,
         height_dim: int = 132,
         foot_height_dim: int = 4,
-        next_proprio_dim: int = 45,
+        next_proprio_dim: int = 47,
         activation: str = "elu",
         transformer_heads: int = 4,
         sample_latent_in_training: bool = False,

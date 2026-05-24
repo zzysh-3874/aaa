@@ -13,7 +13,7 @@ from parkour_tasks.extreme_parkour_task.config.go2.agents.parkour_rl_cfg import 
 class ParkourRslRlPIEActorCriticCfg(RslRlPpoActorCriticCfg):
     class_name: str = "SimpleActorCritic"
     init_noise_std: float = 1.0
-    num_actor_obs: int = 116
+    num_actor_obs: int = 118
     action_limit: float | None = 1.2
     actor_hidden_dims: list[int] = [256, 256, 128]
     critic_hidden_dims: list[int] = [256, 256, 128]
@@ -87,13 +87,15 @@ class ParkourRslRlPIEBridgeActorCriticCfg(ParkourRslRlPIEActorCriticCfg):
 class ParkourRslRlPIEEstimatorCfg:
     class_name: str = "PIEEstimator"
     learning_rate: float = 1.0e-4
+    proprio_dim: int = 47
+    next_proprio_dim: int = 47
     sample_latent_in_training: bool = False
     train_with_estimated_states: bool = False
     use_pie_estimator_rollout: bool = True
     use_pie_actor_features: bool = True
     detach_pie_actor_features: bool = True
     pie_joint_actor_estimator: bool = False
-    pie_policy_obs_dim: int = 45
+    pie_policy_obs_dim: int = 47
     pie_actor_estimator_grad_scale: float = 1.0
     pie_actor_feature_clip: float | None = 5.0
     pie_actor_feature_keys: tuple[str, ...] = ("z_m", "z_mu", "v_hat", "h_f_hat")
