@@ -23,7 +23,7 @@ DEFAULT_PIE_ESTIMATOR_TARGET_SHAPES = {
     "base_velocity": (3,),
     "foot_clearance": (4,),
     "height_scan": (132,),
-    "next_proprioception": (45,),
+    "next_proprioception": (47,),
     "next_proprioception_mask": (1,),
 }
 
@@ -49,7 +49,7 @@ class PIEEstimatorRolloutStorage:
         num_envs: int,
         num_transitions_per_env: int,
         depth_shape: tuple[int, ...] = (2, 58, 87),
-        proprioception_history_shape: tuple[int, ...] = (10, 45),
+        proprioception_history_shape: tuple[int, ...] = (10, 47),
         target_shapes: Mapping[str, tuple[int, ...]] | None = None,
         device: torch.device | str = "cpu",
         dtype: torch.dtype = torch.float32,

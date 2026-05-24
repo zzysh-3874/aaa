@@ -250,11 +250,11 @@ def pie_critic_observation(
 ) -> torch.Tensor:
     """PIE privileged critic observation aligned with the Teacher critic.
 
-    Layout (220 dims total for default Go2 setup):
+    Layout (211 dims total for default Go2 setup):
         - proprioception            (47)  shared with actor (delta_yaw included)
         - base_velocity             ( 3)  ground-truth root linear velocity
         - height_scan               (132) ground-truth ray-cast heightmap
-        - priv_latent.mass_params   ( 13) base mass + COM offset
+        - priv_latent.mass_params   (  4) base mass (1) + COM offset (3)
         - priv_latent.friction      (  1) ground friction coefficient
         - priv_latent.stiff_offset  ( 12) (joint_stiffness/default - 1)
         - priv_latent.damp_offset   ( 12) (joint_damping/default - 1)
