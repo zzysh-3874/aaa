@@ -64,13 +64,15 @@ class ParkourRslRlPIEFullParkourActorCriticCfg(ParkourRslRlPIEActorCriticCfg):
     The Gentle/GentleLoadFix variants lower ``init_noise_std`` to 0.30 because
     they fine-tune from an already-walking checkpoint. Training PIE from
     random init on the multi-terrain Teacher mix needs much more exploration,
-    matching Teacher's 1.0. Hidden dims and ELU stay at the PIE defaults
-    because the PIE estimator + GRU already provides strong feature extraction,
-    so widening the actor MLP to Teacher's 512 width is unnecessary.
+    matching Teacher's 1.0. Hidden dims widened to ``[512, 256, 128]`` so the
+    first MLP layer can absorb the asymmetric critic privileged input (220
+    dims) and the actor's heterogeneous proprio + estimator-latent stream.
     """
 
     init_noise_std: float = 1.0
     action_limit: float | None = 1.2
+    actor_hidden_dims: list[int] = [512, 256, 128]
+    critic_hidden_dims: list[int] = [512, 256, 128]
 
 
 @configclass
