@@ -29,6 +29,7 @@ from .parkour_mdp_cfg import (
     StairsBeamRewardsCfg,
     StairsOnlyRewardsCfg,
     GapOnlyRewardsCfg,
+    TeacherRewardsCfg,
     TerminationsCfg,
 )
 from .parkour_student_cfg import ParkourStudentSceneCfg
@@ -427,8 +428,118 @@ class UnitreeGo2PIEGapOnlyEnvCfg(UnitreeGo2PIEFlatWalkEnvCfg):
         self.commands.base_velocity.debug_vis = True
         self.parkours.base_parkour.debug_vis = True
         self.parkours.base_parkour.num_future_goal_obs = 6
-        # Enable depth camera visualization for play.
-        self.scene.depth_camera.debug_vis = True
+        # Disable all ray caster debug visualizations (height scanner, foot
+        # scanners, depth camera) so play stays clean of red/green ray hit
+        # markers. Only the velocity arrow + goal markers remain visible.
+        self.scene.height_scanner.debug_vis = False
+        self.scene.foot_scanner_fl.debug_vis = False
+        self.scene.foot_scanner_fr.debug_vis = False
+        self.scene.foot_scanner_rl.debug_vis = False
+        self.scene.foot_scanner_rr.debug_vis = False
+        self.scene.depth_camera.debug_vis = False
+
+
+@configclass
+class UnitreeGo2PIEFullParkourEnvCfg(UnitreeGo2PIEGapOnlyEnvCfg):
+    """Teacher-style full-parkour env with PIE network and a gap_corridor slot.
+
+    Goals
+    -----
+    Reproduce the Teacher policy training environment (5 mixed parkour
+    sub-terrains with goal y-offsets) while keeping the PIE network stack
+    (PIE estimator + depth camera + actor with proprio/depth features +
+    privileged critic). Adds a 6th sub-terrain ``gap_corridor`` (3-gap
+    corridor from the GapOnly experiment) so the policy still sees the
+    multi-gap layout we previously fine-tuned.
+
+    Differences vs ``UnitreeGo2PIEGapOnlyEnvCfg``
+    ---------------------------------------------
+    - Terrain: 6-way mix (parkour_gap, parkour_hurdle, parkour_flat,
+      parkour_step, parkour, gap_corridor). 16x4m tiles, 10 rows x 40 cols.
+    - Reward: ``TeacherRewardsCfg`` (13 dense terms, no goal_reached
+      bonus, no command-frame velocity tracking, stronger action_rate
+      penalty). This is the reward set the original Teacher policy used.
+    - Difficulty range: (0.0, 1.0) instead of (0.0, 0.15).
+    - Episode length: 20s (matches Teacher).
+    - num_goals: defaults to 8 (terrain generator default).
+
+    Network / observation / actions are inherited from PIE so the existing
+    ``OnPolicyRunnerWithExtractor`` + ``PPOWithExtractor`` + ``PIEEstimator``
+    pipeline runs unchanged. Trains from random init on this env produces
+    a Teacher-equivalent policy that keeps PIE's depth-vision deployment
+    path.
+    """
+
+    rewards: TeacherRewardsCfg = TeacherRewardsCfg()
+    terminations: TerminationsCfg = TerminationsCfg()
+    commands: CommandsCfg = CommandsCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        from parkour_isaaclab.terrains.extreme_parkour.config.full_parkour_with_gap import (
+            FULL_PARKOUR_WITH_GAP_TERRAINS_CFG,
+        )
+        self.scene.terrain.terrain_generator = FULL_PARKOUR_WITH_GAP_TERRAINS_CFG
+        self.scene.terrain.max_init_terrain_level = 0
+        # Match Teacher's episode budget; 20s gives the policy enough time
+        # to traverse the 16m corridor at the typical 0.5-0.8 m/s commanded
+        # speed without leaning on time-out resets.
+        self.episode_length_s = 20.0
+        # ParkourCommand: heading=0 (straight ahead), v_x range copied from
+        # the default CommandsCfg (0.3 - 0.8 m/s) which matches Teacher.
+        # Heading rotation in (-1.6, 1.6) is also the Teacher default; the
+        # GapOnly child class narrowed this to 0, so re-open it here.
+        self.commands.base_velocity.ranges.lin_vel_x = (0.3, 0.8)
+        self.commands.base_velocity.ranges.heading = (-1.6, 1.6)
+        # Teacher uses the default heading_control_stiffness=0.8, which
+        # CommandsCfg already provides; explicitly state it for clarity.
+        self.commands.base_velocity.heading_control_stiffness = 0.8
+        self.commands.base_velocity.clips.lin_vel_clip = 0.2
+        self.commands.base_velocity.clips.ang_vel_clip = 0.4
+        self.commands.base_velocity.debug_vis = True
+        self.parkours.base_parkour.debug_vis = True
+        self.parkours.base_parkour.num_future_goal_obs = 6
+        # All ray caster debug visualisations stay off (set by the parent
+        # GapOnly class). No additional changes needed for play.
+
+        # Re-enable Teacher-style domain randomisation, with smaller
+        # magnitudes than Teacher's defaults. The PIE parent chain disabled
+        # all three (StableEasy zero-out + FlatWalk further nulling
+        # push_by_setting_velocity) which is appropriate for static-walking
+        # warmup but leaves a from-scratch parkour policy too brittle.
+        from isaaclab.envs.mdp.events import randomize_rigid_body_mass as _rrm
+        from parkour_isaaclab.envs.mdp import events as _proj_events
+        # base mass ±10–30% of the ~5 kg Go2 base.
+        self.events.randomize_rigid_body_mass = EventTerm(
+            func=_rrm,
+            mode="startup",
+            params={
+                "asset_cfg": SceneEntityCfg("robot", body_names="base"),
+                "mass_distribution_params": (-0.5, 1.5),
+                "operation": "add",
+            },
+        )
+        # base COM jitter ±1 cm (half of Teacher's ±2 cm).
+        self.events.randomize_rigid_body_com = EventTerm(
+            func=_proj_events.randomize_rigid_body_com,
+            mode="startup",
+            params={
+                "asset_cfg": SceneEntityCfg("robot", body_names="base"),
+                "com_range": {
+                    "x": (-0.01, 0.01),
+                    "y": (-0.01, 0.01),
+                    "z": (-0.01, 0.01),
+                },
+            },
+        )
+        # Periodic ±0.3 m/s push every 10 s (vs Teacher's ±0.5 / 8 s).
+        self.events.push_by_setting_velocity = EventTerm(
+            func=isaac_events.push_by_setting_velocity,
+            params={"velocity_range": {"x": (-0.3, 0.3), "y": (-0.3, 0.3)}},
+            interval_range_s=(10.0, 10.0),
+            is_global_time=True,
+            mode="interval",
+        )
 
 
 @configclass

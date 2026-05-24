@@ -26,6 +26,11 @@ GAP_ONLY_TERRAINS_CFG = ParkourTerrainGeneratorCfg(
             apply_roughness=False,
             apply_flat=True,
             x_range=(1.2, 2.2),
+            # Force goals onto the centerline. The default y_range=(-0.4, 0.4)
+            # makes mid-tile goals offset sideways, which causes ParkourCommand
+            # target_yaw to point off-axis and the policy gets dragged
+            # diagonally instead of walking straight.
+            y_range=(0.0, 0.1),
             half_valid_width=(0.4, 0.8),
             hurdle_height_range="0.1+0.1*difficulty, 0.15+0.15*difficulty",
         ),
