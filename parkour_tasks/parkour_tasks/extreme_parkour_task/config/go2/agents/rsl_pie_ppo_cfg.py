@@ -58,6 +58,22 @@ class ParkourRslRlPIEGentleLoadFixActorCriticCfg(ParkourRslRlPIEGentleActorCriti
 
 
 @configclass
+class ParkourRslRlPIEFullParkourActorCriticCfg(ParkourRslRlPIEActorCriticCfg):
+    """From-scratch FullParkour actor: Teacher-level exploration with PIE arch.
+
+    The Gentle/GentleLoadFix variants lower ``init_noise_std`` to 0.30 because
+    they fine-tune from an already-walking checkpoint. Training PIE from
+    random init on the multi-terrain Teacher mix needs much more exploration,
+    matching Teacher's 1.0. Hidden dims and ELU stay at the PIE defaults
+    because the PIE estimator + GRU already provides strong feature extraction,
+    so widening the actor MLP to Teacher's 512 width is unnecessary.
+    """
+
+    init_noise_std: float = 1.0
+    action_limit: float | None = 1.2
+
+
+@configclass
 class ParkourRslRlPIEBridgeActorCriticCfg(ParkourRslRlPIEActorCriticCfg):
     """Moderate exploration and action range after a stable Gentle warmup."""
 
@@ -176,6 +192,27 @@ class UnitreeGo2PIEGentleLoadFixPPORunnerCfg(UnitreeGo2PIEGentlePPORunnerCfg):
     save_interval = 2000
     clip_actions = 1.2
     policy = ParkourRslRlPIEGentleLoadFixActorCriticCfg()
+
+
+@configclass
+class UnitreeGo2PIEFullParkourPPORunnerCfg(UnitreeGo2PIEParkourPPORunnerCfg):
+    """From-scratch PIE training on the Teacher-style multi-terrain mix.
+
+    Differences vs ``UnitreeGo2PIEGentleLoadFixPPORunnerCfg``:
+    - ``init_noise_std=1.0`` and ``entropy_coef=0.01`` (Teacher levels) so the
+      randomly-initialised actor explores enough to discover walking.
+    - Inherits ``UnitreeGo2PIEParkourPPORunnerCfg`` (entropy_coef already 0.01)
+      directly, so the Gentle warmup-tuned values do not leak in.
+    - Keeps ``dagger_update_freq=1`` and the PIE-style
+      ``priv_reg_coef_schedual=[0,0,0,1.0]`` because those are dictated by
+      the PIE estimator architecture, not the training stage.
+    - ``save_interval=2000`` matches what we have been using on 4090 server
+      for long training runs.
+    """
+
+    save_interval = 2000
+    clip_actions = 1.2
+    policy = ParkourRslRlPIEFullParkourActorCriticCfg()
 
 
 @configclass
