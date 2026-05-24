@@ -543,6 +543,58 @@ class UnitreeGo2PIEFullParkourEnvCfg(UnitreeGo2PIEGapOnlyEnvCfg):
 
 
 @configclass
+class UnitreeGo2PIEFlatParkourEnvCfg(UnitreeGo2PIEFullParkourEnvCfg):
+    """Flat-only stage 1 of the FullParkour curriculum.
+
+    Same network / obs / reward / command stack as ``UnitreeGo2PIEFullParkourEnvCfg``
+    so checkpoints transfer cleanly to FullParkour for stage 2 finetuning.
+    What changes:
+
+    - Terrain: 100% ``parkour_flat`` (one of the Teacher 5-terrain mix slots,
+      already shaped as 'goals on a flat strip with low roughness').
+      ``apply_roughness`` is also turned off so the surface is true flat.
+    - Difficulty range narrowed to (0.0, 0.3); the parkour_flat sub-terrain's
+      hurdle_height_range is irrelevant because apply_flat=True replaces
+      hurdles with a flat strip.
+    - Domain randomisation disabled (mass / COM / push) so the from-scratch
+      walking policy isn't fighting unmodelled dynamics during bootstrap.
+    - episode_length_s = 20s (inherited from FullParkour) is enough for goals
+      on a 16m tile at 0.3-0.8 m/s commanded velocity.
+
+    Use this as stage 1; once the policy walks reliably (e.g.
+    `how_far_from_start > 5m`, `terrain_levels` rising), resume into
+    ``UnitreeGo2PIEFullParkourEnvCfg`` for the full obstacle mix.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        # All sub-terrains -> proportion 0 except parkour_flat.
+        terrain_generator = self.scene.terrain.terrain_generator
+        if terrain_generator is not None:
+            for key, sub_terrain in terrain_generator.sub_terrains.items():
+                sub_terrain.proportion = 1.0 if key == "parkour_flat" else 0.0
+                # Even the parkour_flat slot has hidden hurdle bumps
+                # depending on its cfg; keep apply_flat True (its default
+                # in FULL_PARKOUR_WITH_GAP_TERRAINS_CFG) and turn off the
+                # roughness perturbation so this stage is genuinely flat.
+                if hasattr(sub_terrain, "apply_roughness"):
+                    sub_terrain.apply_roughness = False
+                if hasattr(sub_terrain, "noise_range"):
+                    sub_terrain.noise_range = (0.0, 0.0)
+            # Narrow difficulty so the curriculum resampler always gives easy
+            # goals; no hidden bumps mean difficulty doesn't really matter
+            # for parkour_flat, but we keep it bounded for clarity.
+            terrain_generator.difficulty_range = (0.0, 0.3)
+        self.scene.terrain.max_init_terrain_level = 0
+
+        # Disable domain randomisation during the walking-bootstrap stage. The
+        # parent FullParkour cfg explicitly turned these on; we re-disable.
+        self.events.randomize_rigid_body_mass = None
+        self.events.randomize_rigid_body_com = None
+        self.events.push_by_setting_velocity = None
+
+
+@configclass
 class UnitreeGo2PIEParkourEnvCfg_StableEasyHeightBridge(UnitreeGo2PIEParkourEnvCfg_StableEasy):
     """Bridge curriculum after Gentle warmup: faster commands and less height shaping."""
 
