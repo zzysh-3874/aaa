@@ -220,6 +220,34 @@ class UnitreeGo2PIEFullParkourPPORunnerCfg(UnitreeGo2PIEParkourPPORunnerCfg):
 
 
 @configclass
+class ParkourRslRlPIEFlatStage1ActorCriticCfg(ParkourRslRlPIEFullParkourActorCriticCfg):
+    """Stage-1 actor with tighter action bounds.
+
+    Cuts ``action_limit`` from 1.2 to 0.8 so the actor cannot park its
+    output at the saturation rail and lean on PD overshoot. This was the
+    root cause of the FlatStage1 v1/v2 failures: with action_limit=1.2 the
+    target calf angle could be set 0.6 rad past the soft joint limit, which
+    let the policy hide a degenerate "drag-and-shake" gait behind a high
+    Train/mean_reward. Stage 2 (FullParkour) restores 1.2 to give the
+    policy enough range for hurdles / gap jumps; until then 0.8 forces a
+    proper trot during walking bootstrap.
+
+    All other settings (init_noise_std=1.0, [512,256,128] hidden dims) are
+    inherited unchanged from FullParkour.
+    """
+
+    action_limit: float | None = 0.8
+
+
+@configclass
+class UnitreeGo2PIEFlatStage1PPORunnerCfg(UnitreeGo2PIEFullParkourPPORunnerCfg):
+    """Stage-1 PPO runner that uses the tighter-action ActorCritic above."""
+
+    clip_actions = 0.8
+    policy = ParkourRslRlPIEFlatStage1ActorCriticCfg()
+
+
+@configclass
 class UnitreeGo2PIEBridgePPORunnerCfg(UnitreeGo2PIEParkourPPORunnerCfg):
     """Bridge runner that relaxes Gentle constraints before full PIE training."""
 
