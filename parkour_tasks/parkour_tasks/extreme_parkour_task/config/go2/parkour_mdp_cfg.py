@@ -416,6 +416,20 @@ class FlatStageOneRewardsCfg(TeacherRewardsCfg):
             "asset_cfg": SceneEntityCfg("robot"),
         },
     )
+    # Penalise the 2nd-order difference of action (jerk). Closes the
+    # "small-amplitude high-frequency jitter" loophole that bare
+    # reward_action_rate (L2 of a_t - a_{t-1}) leaves open: a policy
+    # that flips action sign every step at small amplitude pays only
+    # 0.001/step of action_rate but produces a visibly jittery gait.
+    # Penalising jerk (a_t - 2*a_{t-1} + a_{t-2}) stays close to zero
+    # for smooth walking but blows up for sign-flipping jitter.
+    reward_action_jerk = RewTerm(
+        func=rewards.reward_action_jerk,
+        weight=-0.005,
+        params={
+            "action_name": "joint_pos",
+        },
+    )
     # Drop "base" from collision body filter: a base contact means the
     # robot has fallen over, which is handled by the termination's roll /
     # pitch / height cutoffs and resets the episode immediately. Letting

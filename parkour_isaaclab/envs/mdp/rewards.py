@@ -700,3 +700,37 @@ def reward_dof_pos_limits(
     out_of_lower = (soft_lower - joint_pos).clamp(min=0.0)
     out_of_upper = (joint_pos - soft_upper).clamp(min=0.0)
     return torch.sum(out_of_lower + out_of_upper, dim=1)
+
+
+def reward_action_jerk(
+    env: ParkourManagerBasedRLEnv,
+    action_name: str = "joint_pos",
+) -> torch.Tensor:
+    """Penalise the second-order finite difference of action (jerk).
+
+    ``reward_action_rate`` = L2 of (a_t - a_{t-1}) penalises any change in
+    action, which means smooth walking (large but consistent velocity)
+    incurs a sizeable penalty too. Lowering its weight (the FlatStage1
+    config did) opens a loophole: small-amplitude high-frequency jitter
+    (where |a_t - a_{t-1}| stays small but the sign flips every step)
+    racks up trivial action_rate penalty while letting the policy fake
+    a walking gait.
+
+    The 2nd-order difference catches that. For smooth walking the
+    acceleration of action is roughly constant so jerk is small; for
+    jittery output the jerk is large.
+
+        jerk = (a_t - a_{t-1}) - (a_{t-1} - a_{t-2})
+             = a_t - 2 * a_{t-1} + a_{t-2}
+
+    Returns L2 norm of jerk per env. Use a NEGATIVE weight to penalise.
+    """
+    action_term = env.action_manager.get_term(action_name)
+    history = action_term.action_history_buf
+    if history.shape[1] < 3:
+        return torch.zeros(env.num_envs, device=env.device)
+    a_t = history[:, -1]
+    a_t1 = history[:, -2]
+    a_t2 = history[:, -3]
+    jerk = a_t - 2.0 * a_t1 + a_t2
+    return torch.sum(torch.square(jerk), dim=1)

@@ -272,7 +272,7 @@ gym.register(
     entry_point="parkour_isaaclab.envs:ParkourManagerBasedRLEnv",
     disable_env_checker=True,
     kwargs={
-        "env_cfg_entry_point": f"{__name__}.parkour_pie_cfg:UnitreeGo2PIEFullParkourEnvCfg",
+        "env_cfg_entry_point": f"{__name__}.parkour_pie_cfg:UnitreeGo2PIEFullParkourStage2WarmEnvCfg",
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_pie_ppo_cfg:UnitreeGo2PIEFullStage2WarmPPORunnerCfg",
     },
 )

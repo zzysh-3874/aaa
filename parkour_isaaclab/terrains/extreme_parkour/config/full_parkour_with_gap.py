@@ -31,16 +31,24 @@ FULL_PARKOUR_WITH_GAP_TERRAINS_CFG = ParkourTerrainGeneratorCfg(
     # num_goals=8 (default in ParkourTerrainGeneratorCfg) — matches Teacher.
     sub_terrains={
         # Teacher 5-terrain mix (20% each).
+        # noise_range=(0.0, 0.06) starts row 0 fully flat (max_height = 0)
+        # and ramps up to 6 cm of random surface noise at row 9. The default
+        # (0.02, 0.06) put 2 cm of noise on row 0 which a Stage-1 walking
+        # policy trained on a fully smooth floor cannot handle - the robot
+        # slipped and fell within two steps. Smooth row 0 lets the policy
+        # bootstrap on the obstacle mix before adding rough-floor randomness.
         "parkour_gap": ExtremeParkourGapTerrainCfg(
             proportion=0.2,
             apply_roughness=True,
+            noise_range=(0.0, 0.06),
             x_range=(0.8, 1.5),
             half_valid_width=(0.6, 1.2),
-            gap_size="0.1 + 0.7*difficulty",
+            gap_size="0.05 + 0.65*difficulty",
         ),
         "parkour_hurdle": ExtremeParkourHurdleTerrainCfg(
             proportion=0.2,
             apply_roughness=True,
+            noise_range=(0.0, 0.06),
             x_range=(1.2, 2.2),
             half_valid_width=(0.4, 0.8),
             hurdle_height_range="0.1+0.1*difficulty, 0.15+0.25*difficulty",
@@ -49,6 +57,7 @@ FULL_PARKOUR_WITH_GAP_TERRAINS_CFG = ParkourTerrainGeneratorCfg(
             proportion=0.2,
             apply_roughness=True,
             apply_flat=True,
+            noise_range=(0.0, 0.06),
             x_range=(1.2, 2.2),
             half_valid_width=(0.4, 0.8),
             hurdle_height_range="0.1+0.1*difficulty, 0.15+0.15*difficulty",
@@ -56,6 +65,7 @@ FULL_PARKOUR_WITH_GAP_TERRAINS_CFG = ParkourTerrainGeneratorCfg(
         "parkour_step": ExtremeParkourStepTerrainCfg(
             proportion=0.2,
             apply_roughness=True,
+            noise_range=(0.0, 0.06),
             x_range=(0.3, 1.5),
             half_valid_width=(0.5, 1),
             step_height="0.1 + 0.35*difficulty",
@@ -63,6 +73,7 @@ FULL_PARKOUR_WITH_GAP_TERRAINS_CFG = ParkourTerrainGeneratorCfg(
         "parkour": ExtremeParkourTerrainCfg(
             proportion=0.2,
             apply_roughness=True,
+            noise_range=(0.0, 0.06),
             x_range="-0.1, 0.1+0.3*difficulty",
             y_range="0.2, 0.3+0.1*difficulty",
             stone_len="0.9 - 0.3*difficulty, 1 - 0.2*difficulty",
@@ -72,6 +83,7 @@ FULL_PARKOUR_WITH_GAP_TERRAINS_CFG = ParkourTerrainGeneratorCfg(
         "parkour_demo": ExtremeParkourDemoTerrainCfg(
             proportion=0.0,
             apply_roughness=True,
+            noise_range=(0.0, 0.06),
         ),
     },
 )

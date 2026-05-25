@@ -250,24 +250,26 @@ class UnitreeGo2PIEFlatStage1PPORunnerCfg(UnitreeGo2PIEFullParkourPPORunnerCfg):
 
 @configclass
 class ParkourRslRlPIEFullStage2WarmActorCriticCfg(ParkourRslRlPIEFullParkourActorCriticCfg):
-    """Stage-2 warm-start actor with action_limit=1.0.
+    """Stage-2 warm-start actor: keep Stage 1's action_limit=0.8.
 
-    Stage 1 used 0.8 to suppress saturation cheating during walking
-    bootstrap; jumping over hurdles and gaps needs more joint range.
-    Step from 0.8 to 1.0 first (this cfg) and then to 1.2 (the original
-    FullParkour cfg) so the policy doesn't get blasted with a 50%
-    action scale jump in one go.
+    Earlier we tried 1.0 here to leave room for hurdles / gaps, but a
+    Stage 1 ckpt loaded into action_limit=1.0 has every action
+    instantly scaled 25% larger, which the policy was never trained for
+    and the robot cannot stand within two steps. Stage 2a now keeps the
+    same 0.8 as Stage 1 so the policy only has to adapt to new terrain
+    + heading range, not action scaling. Stage 2b later switches to the
+    original FullParkour cfg (action_limit=1.2) once Stage 2a stabilises.
     """
 
-    action_limit: float | None = 1.0
+    action_limit: float | None = 0.8
 
 
 @configclass
 class UnitreeGo2PIEFullStage2WarmPPORunnerCfg(UnitreeGo2PIEFullParkourPPORunnerCfg):
-    """Stage-2 warm-up runner: clip_actions=1.0, save_interval=500."""
+    """Stage-2 warm-up runner: clip_actions=0.8, save_interval=500."""
 
     save_interval = 500
-    clip_actions = 1.0
+    clip_actions = 0.8
     policy = ParkourRslRlPIEFullStage2WarmActorCriticCfg()
 
 

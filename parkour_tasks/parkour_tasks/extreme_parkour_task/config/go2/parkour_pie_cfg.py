@@ -561,6 +561,56 @@ class UnitreeGo2PIEFullParkourEnvCfg(UnitreeGo2PIEGapOnlyEnvCfg):
 
 
 @configclass
+class UnitreeGo2PIEFullParkourStage2WarmEnvCfg(UnitreeGo2PIEFullParkourEnvCfg):
+    """Stage 2 warm-up environment: full obstacle mix, no domain randomisation.
+
+    The full FullParkour env adds Teacher-style domain randomisation
+    (mass +-1.5 kg startup, COM +-1 cm startup, periodic +-0.3 m/s push
+    every 10 s). When fine-tuning a Stage 1 walker that has only ever
+    seen a perfectly nominal robot on a smooth floor, those three
+    perturbations push the policy into states it has never sampled,
+    and the robot literally cannot stand within two steps even on the
+    smooth row 0 flat sub-terrain.
+
+    This warm-up cfg keeps everything that Stage 2 needs - obstacle
+    mix, smooth row 0 (noise_range=(0.0, 0.06)), Stage 1 anti-cheat
+    reward set, the slightly relaxed termination cutoffs (1.0 rad /
+    0.20 m) - but disables mass / COM / push events. Once the policy
+    is again standing and moving forward on the obstacle mix (Stage
+    2a), the next stage (Stage 2b) flips back to the full FullParkour
+    env to re-introduce robustness perturbations.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        # Disable startup mass / COM jitter and the periodic 10 s push that
+        # the FullParkour parent re-enables. This makes the Stage 2 warm-up
+        # env a strict superset of Stage 1 (Stage 1 already had these off):
+        # the only differences from Stage 1 are obstacle mix + relaxed
+        # termination cutoffs + ParkourCommand heading range, all of which
+        # the Stage 1 policy can handle.
+        self.events.randomize_rigid_body_mass = None
+        self.events.randomize_rigid_body_com = None
+        self.events.push_by_setting_velocity = None
+
+        # Lock heading_target to 0 during Stage 2a warm-up. ParkourCommand's
+        # heading_target is independent of the goal direction; reward_tracking_yaw
+        # rewards turning toward the goal (target_yaw, computed from goal
+        # position) but vel_command_b[2] is the omega command driven by
+        # heading_target. When the two disagree (which they do whenever the
+        # goal is offset in y), the policy gets a contradictory signal: the
+        # reward says turn toward the goal, the command says turn toward
+        # heading_target. On flat single-corridor terrain the Stage 1 policy
+        # learned to ignore omega_cmd; on the obstacle mix it cannot ignore
+        # it any more and ends up staggering backwards. Fix: collapse
+        # heading_target to 0 so omega_cmd = 0.8 * (0 - robot_yaw) (i.e. the
+        # command tells the robot to face +x), aligning with the goal heading
+        # which is also approximately +x for the flat corridor layout.
+        # Stage 2b can re-open the heading range.
+        self.commands.base_velocity.ranges.heading = (0.0, 0.0)
+
+
+@configclass
 class UnitreeGo2PIEFlatParkourEnvCfg(UnitreeGo2PIEFullParkourEnvCfg):
     """Flat-only stage 1 of the FullParkour curriculum.
 
