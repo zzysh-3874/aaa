@@ -261,6 +261,22 @@ gym.register(
     },
 )
 
+# Stage 2 warm-up variant: same env as FullParkour but action_limit=1.0
+# (vs 1.2). Use this when fine-tuning a Stage-1 walking-bootstrap policy
+# (action_limit=0.8) so the action scale jump is gentler. Once the
+# policy stabilises on the obstacle mix, switch back to the
+# Isaac-PIE-FullParkour-Unitree-Go2-v0 task with action_limit=1.2 to
+# get the full joint range needed for harder hurdles / gaps.
+gym.register(
+    id="Isaac-PIE-FullParkour-Stage2Warm-Unitree-Go2-v0",
+    entry_point="parkour_isaaclab.envs:ParkourManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.parkour_pie_cfg:UnitreeGo2PIEFullParkourEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_pie_ppo_cfg:UnitreeGo2PIEFullStage2WarmPPORunnerCfg",
+    },
+)
+
 gym.register(
     id="Isaac-PIE-FlatParkour-Unitree-Go2-v0",
     entry_point="parkour_isaaclab.envs:ParkourManagerBasedRLEnv",

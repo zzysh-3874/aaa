@@ -457,12 +457,18 @@ class UnitreeGo2PIEFullParkourEnvCfg(UnitreeGo2PIEGapOnlyEnvCfg):
     ---------------------------------------------
     - Terrain: 6-way mix (parkour_gap, parkour_hurdle, parkour_flat,
       parkour_step, parkour, gap_corridor). 16x4m tiles, 10 rows x 40 cols.
-    - Reward: ``TeacherRewardsCfg`` (13 dense terms, no goal_reached
-      bonus, no command-frame velocity tracking, stronger action_rate
-      penalty). This is the reward set the original Teacher policy used.
+    - Reward: ``FlatStageOneRewardsCfg`` (Teacher reward + Stage1
+      anti-cheat additions: feet_air_time, dof_pos_limits, collision
+      filter without base). Carries the same anti-cheat constraints
+      that broke the FlatStage1 prone-shake failure mode so the policy
+      cannot regress to the same trick on the obstacle mix.
     - Difficulty range: (0.0, 1.0) instead of (0.0, 0.15).
     - Episode length: 20s (matches Teacher).
     - num_goals: defaults to 8 (terrain generator default).
+    - Termination: same ``terminate_episode`` function as Stage1 with
+      slightly relaxed cutoffs (1.0 rad vs 0.7 rad orientation, 0.20 m
+      vs 0.22 m height) so jumping over hurdles or landing on tilted
+      stones is not aborted, while prone gaits still get reset.
 
     Network / observation / actions are inherited from PIE so the existing
     ``OnPolicyRunnerWithExtractor`` + ``PPOWithExtractor`` + ``PIEEstimator``
@@ -471,7 +477,7 @@ class UnitreeGo2PIEFullParkourEnvCfg(UnitreeGo2PIEGapOnlyEnvCfg):
     path.
     """
 
-    rewards: TeacherRewardsCfg = TeacherRewardsCfg()
+    rewards: FlatStageOneRewardsCfg = FlatStageOneRewardsCfg()
     terminations: TerminationsCfg = TerminationsCfg()
     commands: CommandsCfg = CommandsCfg()
 
@@ -541,6 +547,17 @@ class UnitreeGo2PIEFullParkourEnvCfg(UnitreeGo2PIEGapOnlyEnvCfg):
             is_global_time=True,
             mode="interval",
         )
+
+        # Termination cutoffs: tighter than Teacher defaults (1.5 rad / -0.25 m)
+        # to stop the policy from sliding through episodes in degenerate
+        # poses, but slightly looser than Stage 1 since obstacle landings
+        # legitimately produce more roll / pitch and brief crouching.
+        # Stage 1 was 0.7 / 0.7 / 0.22; Stage 2 uses 1.0 / 1.0 / 0.20 so
+        # hurdle and gap landings are not aborted while prone-shake still
+        # gets caught.
+        self.terminations.total_terminates.params["max_roll"] = 1.0
+        self.terminations.total_terminates.params["max_pitch"] = 1.0
+        self.terminations.total_terminates.params["minimum_height"] = 0.20
 
 
 @configclass

@@ -32,6 +32,17 @@ parser.add_argument(
     help="Load model weights from a checkpoint but start PPO optimizer state fresh.",
 )
 parser.add_argument(
+    "--reset_noise_std",
+    type=float,
+    default=None,
+    help=(
+        "After resuming a checkpoint, reset the actor exploration noise std to "
+        "this value (e.g. 0.5). Useful when a Stage 1 walking-bootstrap policy "
+        "(noise_std ~0.05) is being fine-tuned on a new harder env where the "
+        "policy needs to re-explore."
+    ),
+)
+parser.add_argument(
     "--distributed", action="store_true", default=False, help="Run training with multiple GPUs or nodes."
 )
 # append RSL-RL cli arguments
@@ -189,6 +200,21 @@ def main(env_cfg: ParkourManagerBasedRLEnv |ManagerBasedRLEnvCfg | DirectRLEnvCf
         print(f"[INFO]: Loading model checkpoint from: {resume_path}")
         # load previously trained model
         runner.load(resume_path, load_optimizer=not args_cli.reset_optimizer_on_resume)
+        if args_cli.reset_noise_std is not None:
+            import torch as _torch_for_noise_reset
+            new_std = float(args_cli.reset_noise_std)
+            print(
+                f"[INFO]: Resetting actor noise std to {new_std} for Stage-2 "
+                f"fine-tuning exploration."
+            )
+            with _torch_for_noise_reset.no_grad():
+                noise_std_type = getattr(runner.alg.policy, "noise_std_type", "scalar")
+                if noise_std_type == "scalar":
+                    runner.alg.policy.std.data.fill_(new_std)
+                elif noise_std_type == "log":
+                    runner.alg.policy.log_std.data.fill_(_torch_for_noise_reset.log(
+                        _torch_for_noise_reset.tensor(new_std)
+                    ).item())
     # dump the configuration into log-directory
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)

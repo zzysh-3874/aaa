@@ -249,6 +249,29 @@ class UnitreeGo2PIEFlatStage1PPORunnerCfg(UnitreeGo2PIEFullParkourPPORunnerCfg):
 
 
 @configclass
+class ParkourRslRlPIEFullStage2WarmActorCriticCfg(ParkourRslRlPIEFullParkourActorCriticCfg):
+    """Stage-2 warm-start actor with action_limit=1.0.
+
+    Stage 1 used 0.8 to suppress saturation cheating during walking
+    bootstrap; jumping over hurdles and gaps needs more joint range.
+    Step from 0.8 to 1.0 first (this cfg) and then to 1.2 (the original
+    FullParkour cfg) so the policy doesn't get blasted with a 50%
+    action scale jump in one go.
+    """
+
+    action_limit: float | None = 1.0
+
+
+@configclass
+class UnitreeGo2PIEFullStage2WarmPPORunnerCfg(UnitreeGo2PIEFullParkourPPORunnerCfg):
+    """Stage-2 warm-up runner: clip_actions=1.0, save_interval=500."""
+
+    save_interval = 500
+    clip_actions = 1.0
+    policy = ParkourRslRlPIEFullStage2WarmActorCriticCfg()
+
+
+@configclass
 class UnitreeGo2PIEBridgePPORunnerCfg(UnitreeGo2PIEParkourPPORunnerCfg):
     """Bridge runner that relaxes Gentle constraints before full PIE training."""
 
