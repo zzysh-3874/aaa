@@ -291,3 +291,14 @@ class ParkourManagerBasedRLEnv(ParkourManagerBasedEnv, gym.Env):
         self.extras["log"].update(info)
         # reset the episode length buffer
         self.episode_length_buf[env_ids] = 0
+
+        # Refresh ParkourEvent target_pos_rel / target_yaw using the current
+        # post-reset robot pose. ``parkour_manager.reset(env_ids)`` was
+        # already called above before ``reset_root_state`` event ran, so
+        # the ParkourEvent attributes still reflect the pre-reset robot
+        # pose. Calling ``parkour_manager()`` here re-runs ``__call__`` on
+        # every term which now also rebuilds target_pos_rel / target_yaw
+        # against the freshly-written articulation pose. Without this, the
+        # very first observation after reset feeds PIE actor a stale
+        # delta_yaw that destabilises the policy at play time.
+        self.parkour_manager()

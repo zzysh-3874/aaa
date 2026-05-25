@@ -30,6 +30,7 @@ from .parkour_mdp_cfg import (
     StairsOnlyRewardsCfg,
     GapOnlyRewardsCfg,
     TeacherRewardsCfg,
+    FlatStageOneRewardsCfg,
     TerminationsCfg,
 )
 from .parkour_student_cfg import ParkourStudentSceneCfg
@@ -546,10 +547,15 @@ class UnitreeGo2PIEFullParkourEnvCfg(UnitreeGo2PIEGapOnlyEnvCfg):
 class UnitreeGo2PIEFlatParkourEnvCfg(UnitreeGo2PIEFullParkourEnvCfg):
     """Flat-only stage 1 of the FullParkour curriculum.
 
-    Same network / obs / reward / command stack as ``UnitreeGo2PIEFullParkourEnvCfg``
+    Same network / obs / command stack as ``UnitreeGo2PIEFullParkourEnvCfg``
     so checkpoints transfer cleanly to FullParkour for stage 2 finetuning.
     What changes:
 
+    - Reward: ``FlatStageOneRewardsCfg`` (Teacher reward + feet_air_time
+      and Unitree-rough-style rebalanced torque/action_rate weights). This
+      stops the policy from learning the "drag two rear calves at action
+      limit" failure mode that the bare TeacherRewardsCfg tolerated on
+      flat ground.
     - Terrain: 100% ``parkour_flat`` (one of the Teacher 5-terrain mix slots,
       already shaped as 'goals on a flat strip with low roughness').
       ``apply_roughness`` is also turned off so the surface is true flat.
@@ -565,6 +571,8 @@ class UnitreeGo2PIEFlatParkourEnvCfg(UnitreeGo2PIEFullParkourEnvCfg):
     `how_far_from_start > 5m`, `terrain_levels` rising), resume into
     ``UnitreeGo2PIEFullParkourEnvCfg`` for the full obstacle mix.
     """
+
+    rewards: FlatStageOneRewardsCfg = FlatStageOneRewardsCfg()
 
     def __post_init__(self):
         super().__post_init__()

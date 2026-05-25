@@ -647,3 +647,56 @@ class reward_goal_reached(ManagerTermBase):
         rew = (cur > self.previous_goal_idx).float()
         self.previous_goal_idx = cur.clone()
         return rew
+
+
+def reward_feet_air_time(
+    env: ParkourManagerBasedRLEnv,
+    command_name: str,
+    sensor_cfg: SceneEntityCfg,
+    threshold: float = 0.4,
+    cmd_threshold: float = 0.1,
+) -> torch.Tensor:
+    """Reward each foot for taking long enough swing strides.
+
+    Adapted from ``isaaclab_tasks.manager_based.locomotion.velocity.mdp.rewards.feet_air_time``.
+    For every foot, on the step it newly contacts ground, the reward gets
+    ``last_air_time - threshold`` added. So a foot that never lifts (drag) gets
+    zero, a foot with too-short flicks gets a small negative number, and a foot
+    with healthy ~0.4 s swing gets a positive number. Summed over all four feet
+    this strongly punishes the "drag one or two legs along the ground" failure
+    mode that the bare TeacherRewardsCfg tolerates on flat terrain.
+
+    The reward is gated by command magnitude so a stationary robot is not
+    asked to take steps.
+    """
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    first_contact = contact_sensor.compute_first_contact(env.step_dt)[:, sensor_cfg.body_ids]
+    last_air_time = contact_sensor.data.last_air_time[:, sensor_cfg.body_ids]
+    reward = torch.sum((last_air_time - threshold) * first_contact, dim=1)
+    cmd_norm = torch.norm(env.command_manager.get_command(command_name)[:, :2], dim=1)
+    reward *= cmd_norm > cmd_threshold
+    return reward
+
+
+def reward_dof_pos_limits(
+    env: ParkourManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Penalise joint positions that exceed soft limits.
+
+    Standard Isaac Lab term: returns the per-env L1 sum of how far each
+    joint has crossed its lower / upper soft limit (zero if within bounds).
+    Use a negative weight to discourage policies from saturating the
+    action_limit and pinning joints at their physical extremes - a
+    failure mode we observed at FlatStage1 play time where the rear
+    calves were stuck at +1.2 (action limit) and the policy could not
+    actually walk despite winning the tracking reward.
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    joint_pos = asset.data.joint_pos[:, asset_cfg.joint_ids]
+    soft_lower = asset.data.soft_joint_pos_limits[:, asset_cfg.joint_ids, 0]
+    soft_upper = asset.data.soft_joint_pos_limits[:, asset_cfg.joint_ids, 1]
+    # how far below lower / above upper, clamped at >=0
+    out_of_lower = (soft_lower - joint_pos).clamp(min=0.0)
+    out_of_upper = (joint_pos - soft_upper).clamp(min=0.0)
+    return torch.sum(out_of_lower + out_of_upper, dim=1)

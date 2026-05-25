@@ -104,6 +104,26 @@ class ParkourEvent(ParkourTerm):
     def __call__(self):
         self.cur_goals = self._gather_cur_goals()
         self.next_goals = self._gather_cur_goals(future=1)
+        # Always refresh target_pos_rel / target_yaw using the current robot
+        # pose. ``parkour_manager()`` is invoked from
+        # ``ParkourManagerBasedRLEnv.step`` after ``_reset_idx`` has run
+        # ``reset_root_state`` (placing the robot in its new sub-terrain
+        # frame) and BEFORE ``observation_manager.compute()`` builds the
+        # next obs. Without this refresh the target_yaw used by
+        # ``pie_proprioception`` would still reflect ``_resample_command``'s
+        # stale robot pose (from before reset_root_state), producing a
+        # bogus delta_yaw on the first post-reset observation. PIE actor
+        # at play time cannot recover from that single frame because the
+        # initial action sends the robot into an unstable pose.
+        robot_root_pos_w = self.robot.data.root_pos_w[:, :2] - self.env_origins[:, :2]
+        self.target_pos_rel = self.cur_goals[:, :2] - robot_root_pos_w
+        self.next_target_pos_rel = self.next_goals[:, :2] - robot_root_pos_w
+        norm_t = torch.norm(self.target_pos_rel, dim=-1, keepdim=True)
+        target_vec_norm = self.target_pos_rel / (norm_t + 1e-5)
+        self.target_yaw = torch.atan2(target_vec_norm[:, 1], target_vec_norm[:, 0])
+        norm_n = torch.norm(self.next_target_pos_rel, dim=-1, keepdim=True)
+        next_vec_norm = self.next_target_pos_rel / (norm_n + 1e-5)
+        self.next_target_yaw = torch.atan2(next_vec_norm[:, 1], next_vec_norm[:, 0])
 
     def _gather_cur_goals(self, future=0):
         return self.env_goals.gather(1, (self.cur_goal_idx[:, None, None]+future).expand(-1, -1, self.env_goals.shape[-1])).squeeze(1)
@@ -158,7 +178,6 @@ class ParkourEvent(ParkourTerm):
         move_up = self.dis_to_start_pos > 0.8*threshold
         move_down = self.dis_to_start_pos < 0.4*threshold
 
-        robot_root_pos_w = self.robot.data.root_pos_w[:, :2] - self.env_origins[:, :2]
         self.terrain.terrain_levels[env_ids] += 1 * move_up - 1 * move_down
         # # Robots that solve the last level are sent to a random one
         self.terrain.terrain_levels[env_ids] = torch.where(self.terrain.terrain_levels[env_ids]>=self.terrain.max_terrain_level,
@@ -173,6 +192,15 @@ class ParkourEvent(ParkourTerm):
         self.cur_goals = self._gather_cur_goals()
         self.next_goals = self._gather_cur_goals(future=1)
 
+        # ``robot_root_pos_w`` MUST be re-computed AFTER env_origins have been
+        # updated by the curriculum step above. The original placement of
+        # this line before env_origins[env_ids] = ... left the local position
+        # frame inconsistent with cur_goals on iterations where the curriculum
+        # bumped the robot to a different sub-terrain; that produced
+        # garbage target_pos_rel / target_yaw for the very first observation
+        # after a reset and severely confused PIE actor inference at play
+        # time, even though it averaged out across millions of training steps.
+        robot_root_pos_w = self.robot.data.root_pos_w[:, :2] - self.env_origins[:, :2]
         self.target_pos_rel = self.cur_goals[:, :2] - robot_root_pos_w
         self.next_target_pos_rel = self.next_goals[:, :2] - robot_root_pos_w
         norm = torch.norm(self.target_pos_rel, dim=-1, keepdim=True)

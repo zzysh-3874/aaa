@@ -351,6 +351,73 @@ class TeacherRewardsCfg:
     )
 
 @configclass
+class FlatStageOneRewardsCfg(TeacherRewardsCfg):
+    """Stage-1 reward set for FlatParkour bootstrapping.
+
+    Inherits the Teacher reward stack but rebalances and adds a
+    ``feet_air_time`` term to break the "drag two hind legs along the
+    ground" failure mode we observed when training PIE from scratch with
+    bare TeacherRewardsCfg on flat terrain. The previous run reached an
+    apparent ``Train/mean_reward = +35`` but at play time the policy
+    pinned both rear calves at the +1.2 action limit and slid forward;
+    episode_length collapsed from ~970 in training to <200 at play.
+
+    Adapted from the Unitree Go2 rough-terrain reward set in IsaacLab
+    (``isaaclab_tasks.manager_based.locomotion.velocity.config.go2``):
+
+    Key changes vs Teacher:
+    - ``reward_lin_vel_z``  -1.0 -> -2.0  (stronger vertical motion penalty)
+    - ``reward_torques``    -1e-5 -> -5e-5 (mid-strength)
+    - ``reward_action_rate``-0.1  -> -0.03 (slightly relaxed)
+    - ``reward_feet_air_time`` weight=+0.1 with threshold=0.25 s, gated on
+      lin-vel command magnitude. Forces every foot to take real swings.
+    - ``reward_dof_pos_limits`` weight=-2.0. Directly punishes joint
+      angles that cross the soft limits; closes the "pin both rear
+      calves at +1.2 action limit" cheat path that the bare Teacher
+      reward tolerates.
+    - All other Teacher terms preserved verbatim.
+    """
+
+    reward_lin_vel_z = RewTerm(
+        func=rewards.reward_lin_vel_z,
+        weight=-2.0,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "parkour_name": "base_parkour",
+        },
+    )
+    reward_torques = RewTerm(
+        func=rewards.reward_torques,
+        weight=-5.0e-5,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+        },
+    )
+    reward_action_rate = RewTerm(
+        func=rewards.reward_action_rate,
+        weight=-0.03,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+        },
+    )
+    reward_feet_air_time = RewTerm(
+        func=rewards.reward_feet_air_time,
+        weight=0.1,
+        params={
+            "command_name": "base_velocity",
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot"),
+            "threshold": 0.25,
+        },
+    )
+    reward_dof_pos_limits = RewTerm(
+        func=rewards.reward_dof_pos_limits,
+        weight=-2.0,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+        },
+    )
+
+@configclass
 class PIERewardsCfg:
     """PIE Table I reward terms.
 
