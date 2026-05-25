@@ -26,16 +26,24 @@ if TYPE_CHECKING:
 def terminate_episode(
     env: ParkourManagerBasedRLEnv,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    max_roll: float = 1.5,
+    max_pitch: float = 1.5,
+    minimum_height: float | None = None,
 ):  
     reset_buf = torch.zeros((env.num_envs, ), dtype=torch.bool, device=env.device)
     asset: Articulation = env.scene[asset_cfg.name]
     roll, pitch, _ = euler_xyz_from_quat(asset.data.root_state_w[:,3:7])
-    roll_cutoff = torch.abs(wrap_to_pi(roll)) > 1.5
-    pitch_cutoff = torch.abs(wrap_to_pi(pitch)) > 1.5
+    roll_cutoff = torch.abs(wrap_to_pi(roll)) > max_roll
+    pitch_cutoff = torch.abs(wrap_to_pi(pitch)) > max_pitch
     time_out_buf = env.episode_length_buf >= env.max_episode_length
     parkour_event: ParkourEvent =  env.parkour_manager.get_term('base_parkour')    
     reach_goal_cutoff = parkour_event.cur_goal_idx >= env.scene.terrain.cfg.terrain_generator.num_goals
     height_cutoff = asset.data.root_state_w[:, 2] < -0.25
+    if minimum_height is not None:
+        height_cutoff = torch.logical_or(
+            height_cutoff,
+            asset.data.root_state_w[:, 2] < minimum_height,
+        )
     time_out_buf |= reach_goal_cutoff
     reset_buf |= time_out_buf
     reset_buf |= roll_cutoff

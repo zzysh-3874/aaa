@@ -416,6 +416,23 @@ class FlatStageOneRewardsCfg(TeacherRewardsCfg):
             "asset_cfg": SceneEntityCfg("robot"),
         },
     )
+    # Drop "base" from collision body filter: a base contact means the
+    # robot has fallen over, which is handled by the termination's roll /
+    # pitch / height cutoffs and resets the episode immediately. Letting
+    # reward_collision also fire on base just adds redundant gradient
+    # noise for the same event. Keep calf/thigh contact penalised because
+    # those are the legitimate "leg hit something" signals during walking
+    # and parkour.
+    reward_collision = RewTerm(
+        func=rewards.reward_collision,
+        weight=-10.0,
+        params={
+            "sensor_cfg": SceneEntityCfg(
+                "contact_forces",
+                body_names=[".*_calf", ".*_thigh"],
+            ),
+        },
+    )
 
 @configclass
 class PIERewardsCfg:

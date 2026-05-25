@@ -601,6 +601,20 @@ class UnitreeGo2PIEFlatParkourEnvCfg(UnitreeGo2PIEFullParkourEnvCfg):
         self.events.randomize_rigid_body_com = None
         self.events.push_by_setting_velocity = None
 
+        # Tighten orientation cutoffs for ``terminate_episode`` so prone /
+        # heavily-tilted gaits get reset instead of riding out the 20 s
+        # episode and banking a fake-positive Train/mean_reward. The
+        # default 1.5 rad (~86 deg) is meant for parkour landings on
+        # tilted obstacles; on flat terrain a normal trot is well under
+        # 0.2 rad of roll/pitch, so 0.7 rad (~40 deg) is a tight signal
+        # for "policy is failing to stand".
+        # Also add an absolute base-z floor at 0.22 m. Default Go2 stance
+        # is ~0.32 m, so 0.22 m gives 10 cm crouch room while terminating
+        # any "prone-shake" gait long before it accumulates a Train reward.
+        self.terminations.total_terminates.params["max_roll"] = 0.7
+        self.terminations.total_terminates.params["max_pitch"] = 0.7
+        self.terminations.total_terminates.params["minimum_height"] = 0.22
+
 
 @configclass
 class UnitreeGo2PIEParkourEnvCfg_StableEasyHeightBridge(UnitreeGo2PIEParkourEnvCfg_StableEasy):

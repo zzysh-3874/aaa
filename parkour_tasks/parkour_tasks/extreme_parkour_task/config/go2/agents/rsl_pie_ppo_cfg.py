@@ -243,6 +243,7 @@ class ParkourRslRlPIEFlatStage1ActorCriticCfg(ParkourRslRlPIEFullParkourActorCri
 class UnitreeGo2PIEFlatStage1PPORunnerCfg(UnitreeGo2PIEFullParkourPPORunnerCfg):
     """Stage-1 PPO runner that uses the tighter-action ActorCritic above."""
 
+    save_interval = 500
     clip_actions = 0.8
     policy = ParkourRslRlPIEFlatStage1ActorCriticCfg()
 
