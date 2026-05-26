@@ -277,6 +277,23 @@ gym.register(
     },
 )
 
+# Easy variant: same env as Stage2Warm, but every sub-terrain difficulty=0
+# corresponds to a 5 cm obstacle (gap / hurdle / step / incline). Lets a
+# Stage-1 walker that has only seen a flat floor adapt to the multi-corridor
+# layout while the obstacle is small enough that a normal trot stride clears
+# it. difficulty=1 reaches roughly half of the full Stage2Warm peak so the
+# curriculum still has plenty of room to ramp before switching to the regular
+# Stage2Warm cfg for the final stage.
+gym.register(
+    id="Isaac-PIE-FullParkour-Easy-Unitree-Go2-v0",
+    entry_point="parkour_isaaclab.envs:ParkourManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.parkour_pie_cfg:UnitreeGo2PIEFullParkourEasyEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_pie_ppo_cfg:UnitreeGo2PIEFullStage2WarmPPORunnerCfg",
+    },
+)
+
 gym.register(
     id="Isaac-PIE-FlatParkour-Unitree-Go2-v0",
     entry_point="parkour_isaaclab.envs:ParkourManagerBasedRLEnv",

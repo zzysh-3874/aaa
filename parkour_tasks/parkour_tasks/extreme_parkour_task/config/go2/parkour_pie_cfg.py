@@ -647,6 +647,58 @@ class UnitreeGo2PIEFullParkourStage2WarmEnvCfg(UnitreeGo2PIEFullParkourEnvCfg):
 
 
 @configclass
+class UnitreeGo2PIEFullParkourEasyEnvCfg(UnitreeGo2PIEFullParkourStage2WarmEnvCfg):
+    """Easy variant of Stage 2 warm-up: every obstacle starts at 5 cm.
+
+    Layout, rewards, terminations and command stack are identical to
+    ``Stage2Warm``. The only change is the per sub-terrain difficulty
+    expression, so that ``difficulty=0`` produces a 5 cm obstacle that
+    a normal trot stride can clear (Go2 calf is ~15 cm), and
+    ``difficulty=1`` reaches roughly half of the regular Stage2Warm peak.
+    Use this to bridge a Stage 1 flat-only walker to the multi-corridor
+    obstacle layout without the policy being immediately killed by 10-15
+    cm hurdles / steps on row 0.
+
+    Difficulty progressions (vs Stage2Warm parent in parens):
+        gap_size:    0.05 + 0.30*d   (parent: 0.05 + 0.65*d)
+        hurdle_h:    (0.05+0.05*d, 0.05+0.10*d)  (parent: (0.1+0.1*d, 0.15+0.25*d))
+        step_h:      0.05 + 0.10*d   (parent: 0.10 + 0.35*d)
+        incline_h:   0.05 + 0.05*d   (parent: 0.25*d)
+        last_inc_h:  0.05 + 0.05*d   (parent: 0.10 - 0.10*d + incline)
+
+    parkour_flat is left untouched because apply_flat=True already masks
+    its built-in hurdles to a flat strip.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        gen = self.scene.terrain.terrain_generator
+        if gen is None:
+            return
+
+        gap = gen.sub_terrains.get("parkour_gap")
+        if gap is not None:
+            gap.gap_size = "0.05 + 0.30*difficulty"
+
+        hurdle = gen.sub_terrains.get("parkour_hurdle")
+        if hurdle is not None:
+            # numpy.random.randint requires low < high. At difficulty=0
+            # the previous "(0.05, 0.05)" gave low==high → ValueError. Add
+            # a permanent 1 cm gap between low and high so randint stays
+            # well-defined and the policy still sees small variation.
+            hurdle.hurdle_height_range = "0.05 + 0.05*difficulty, 0.06 + 0.10*difficulty"
+
+        step = gen.sub_terrains.get("parkour_step")
+        if step is not None:
+            step.step_height = "0.05 + 0.10*difficulty"
+
+        parkour = gen.sub_terrains.get("parkour")
+        if parkour is not None:
+            parkour.incline_height = "0.05 + 0.05*difficulty"
+            parkour.last_incline_height = "0.05 + 0.05*difficulty"
+
+
+@configclass
 class UnitreeGo2PIEFlatParkourEnvCfg(UnitreeGo2PIEFullParkourEnvCfg):
     """Flat-only stage 1 of the FullParkour curriculum.
 
