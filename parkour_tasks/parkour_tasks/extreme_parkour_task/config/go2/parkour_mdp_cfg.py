@@ -420,10 +420,34 @@ class FlatStageOneRewardsCfg(TeacherRewardsCfg):
     )
     reward_lin_vel_z = RewTerm(
         func=rewards.reward_lin_vel_z,
-        weight=-2.0,
+        weight=-0.5,
         params={
             "asset_cfg": SceneEntityCfg("robot"),
             "parkour_name": "base_parkour",
+        },
+    )
+    # Relax pitch / roll penalty so the policy is allowed to dip its body
+    # forward when clearing a hurdle / step. Stage 1 default (-1.0) plus
+    # the stage 2 termination cutoff at 1.0 rad already keeps the robot
+    # upright; -0.5 here lets the policy commit to a brief dynamic pose
+    # without losing more reward than it gains from goal_reached.
+    reward_orientation = RewTerm(
+        func=rewards.reward_orientation,
+        weight=-0.5,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "parkour_name": "base_parkour",
+        },
+    )
+    # Halved from -1.0. feet_stumble fires whenever |F_xy| > 4 * |F_z|
+    # which is exactly what happens during a hurdle / step landing
+    # (large lateral impulse, small vertical contact). Keeping it at
+    # -1.0 made the policy too cautious to attempt the takeoff.
+    reward_feet_stumble = RewTerm(
+        func=rewards.reward_feet_stumble,
+        weight=-0.5,
+        params={
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot"),
         },
     )
 
@@ -469,7 +493,7 @@ class FlatStageOneRewardsCfg(TeacherRewardsCfg):
         params={
             "command_name": "base_velocity",
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot"),
-            "threshold": 0.25,
+            "threshold": 0.35,
         },
     )
     reward_dof_pos_limits = RewTerm(

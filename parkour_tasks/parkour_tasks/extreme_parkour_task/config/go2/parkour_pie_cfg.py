@@ -609,6 +609,42 @@ class UnitreeGo2PIEFullParkourStage2WarmEnvCfg(UnitreeGo2PIEFullParkourEnvCfg):
         # Stage 2b can re-open the heading range.
         self.commands.base_velocity.ranges.heading = (0.0, 0.0)
 
+        # Add an explicit illegal-body-contact termination. The default
+        # ``terminate_episode`` only resets when world-frame z < 0.20 m,
+        # which never fires when the robot is wedged against a 10-15 cm
+        # hurdle (base z ~0.30 m, robot stuck pushing forward, accumulating
+        # tracking_goal_vel reward without progressing). This term resets
+        # the episode when any of base / hip / thigh / head sustains a
+        # contact force above 30 N - i.e. genuinely stuck pushing into an
+        # obstacle. Threshold raised from 5 N to 30 N so that a brief
+        # brush of the belly when clearing a hurdle is tolerated; only
+        # persistent contact (~50-100 N when wedged) triggers a reset.
+        from isaaclab.managers import TerminationTermCfg as _DoneTerm
+        from parkour_isaaclab.envs.mdp import terminations as _term_funcs
+        self.terminations.illegal_body_contact = _DoneTerm(
+            func=_term_funcs.illegal_body_contact,
+            time_out=False,
+            params={
+                "threshold": 30.0,
+                "sensor_cfg": SceneEntityCfg(
+                    "contact_forces",
+                    body_names=[
+                        "base", ".*_hip", ".*_thigh",
+                        "Head_upper", "Head_lower",
+                    ],
+                ),
+            },
+        )
+
+        # Relax pitch cutoff from 1.0 rad to 1.4 rad (~80 deg). Successful
+        # traversal of a 30 cm hurdle peaks at ~0.5-0.7 rad pitch in flight,
+        # and hurdle landing can transiently hit 0.9-1.0 rad. Keeping the
+        # cutoff at 1.0 rad caused the policy to abort the takeoff because
+        # the moment it pitched forward to clear the obstacle it was reset.
+        # Roll cutoff stays at 1.0 rad - there's no legitimate parkour
+        # situation that produces large lateral roll.
+        self.terminations.total_terminates.params["max_pitch"] = 1.4
+
 
 @configclass
 class UnitreeGo2PIEFlatParkourEnvCfg(UnitreeGo2PIEFullParkourEnvCfg):

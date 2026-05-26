@@ -29,6 +29,12 @@ parser.add_argument(
     help="Use the pre-trained checkpoint from Nucleus.",
 )
 parser.add_argument("--real-time", action="store_true", default=False, help="Run in real-time, if possible.")
+parser.add_argument(
+    "--show_depth",
+    action="store_true",
+    default=False,
+    help="Pop up an OpenCV window with the live depth image grid (8-env tile).",
+)
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
 # append AppLauncher cli args
@@ -76,6 +82,30 @@ def main():
         args_cli.task, device=args_cli.device, num_envs=args_cli.num_envs, use_fabric=not args_cli.disable_fabric
     )
     agent_cfg: ParkourRslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
+
+    # Optionally turn on the depth-camera ObsTerm debug_vis (cv2.imshow grid).
+    # Stays off by default because training runs headless on the server.
+    if args_cli.show_depth:
+        try:
+            depth_obs = env_cfg.observations.depth_camera.depth
+            depth_obs.params["debug_vis"] = True
+            print("[INFO] --show_depth: enabled OpenCV depth grid window.")
+        except AttributeError:
+            print("[WARN] --show_depth requested but env_cfg has no observations.depth_camera.depth term.")
+        # Snap the Isaac Sim viewer onto env 0's robot so the depth grid's
+        # "env 0" tile matches what you're looking at in the simulator.
+        try:
+            from isaaclab.envs import ViewerCfg
+            env_cfg.viewer = ViewerCfg(
+                eye=(-0.0, 2.6, 1.6),
+                lookat=(0.0, 0.0, 0.0),
+                asset_name="robot",
+                origin_type="asset_root",
+                env_index=0,
+            )
+            print("[INFO] --show_depth: viewer locked to env 0 robot.")
+        except Exception as exc:
+            print(f"[WARN] viewer override failed: {exc}")
 
     # specify directory for logging experiments
     log_root_path = os.path.join("logs", "rsl_rl", agent_cfg.experiment_name)

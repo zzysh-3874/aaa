@@ -337,18 +337,41 @@ class image_features(ManagerTermBase):
                 self.depth_buffer[env_id] = torch.cat([self.depth_buffer[env_id, 1:], 
                                                     processed_image.to(self.device).unsqueeze(0)], dim=0)
         if self.debug_vis:
+            # depth_buffer is normalised to [-0.5, 0.5]. Map to 0-255 uint8
+            # and apply a colormap so the window is actually readable.
             depth_images_np = self.depth_buffer[:, -1].detach().cpu().numpy()
-            depth_images_norm = []
-            for img in depth_images_np:
-                depth_images_norm.append(img)
-            rows = []
+            depth_uint8 = np.clip((depth_images_np + 0.5) * 255.0, 0, 255).astype(np.uint8)
+            n = depth_uint8.shape[0]
             ncols = 4
-            for i in range(0, len(depth_images_norm), ncols):
-                row = np.hstack(depth_images_norm[i:i+ncols])  
-                rows.append(row)
-
-            grid_img = np.vstack(rows)   
-            cv2.imshow("depth_images_grid", grid_img)
+            # Apply JET colormap per tile so we can paint a coloured label on top
+            # without it tinting the depth visualisation.
+            tiles = []
+            for i in range(n):
+                tile_color = cv2.applyColorMap(depth_uint8[i], cv2.COLORMAP_JET)
+                # Paint env index in upper-left corner.
+                cv2.putText(
+                    tile_color,
+                    f"env {i}",
+                    (4, 14),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.45,
+                    (255, 255, 255),
+                    1,
+                    cv2.LINE_AA,
+                )
+                tiles.append(tile_color)
+            # Pad to a multiple of ncols.
+            pad_h, pad_w = tiles[0].shape[:2]
+            while len(tiles) % ncols != 0:
+                tiles.append(np.zeros((pad_h, pad_w, 3), dtype=np.uint8))
+            rows = []
+            for i in range(0, len(tiles), ncols):
+                rows.append(np.hstack(tiles[i:i + ncols]))
+            grid_color = np.vstack(rows)
+            # Upscale 4x so the 58x87 tiles are easy to see.
+            h, w = grid_color.shape[:2]
+            grid_color = cv2.resize(grid_color, (w * 4, h * 4), interpolation=cv2.INTER_NEAREST)
+            cv2.imshow("depth_images_grid", grid_color)
             cv2.waitKey(1)
         if self.return_history or return_history:
             return self.depth_buffer.to(env.device)
