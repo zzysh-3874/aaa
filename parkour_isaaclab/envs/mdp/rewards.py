@@ -737,7 +737,16 @@ def reward_feet_air_time(
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
     first_contact = contact_sensor.compute_first_contact(env.step_dt)[:, sensor_cfg.body_ids]
     last_air_time = contact_sensor.data.last_air_time[:, sensor_cfg.body_ids]
-    reward = torch.sum((last_air_time - threshold) * first_contact, dim=1)
+    # Clip the (air_time - threshold) at zero so feet that swung for
+    # *less* than the threshold contribute 0 instead of a negative
+    # reward. Without the clip, every short stride was punished and the
+    # policy converged to a "drag along the floor" gait where
+    # first_contact = 0 (no touchdown event) zeroed the term entirely -
+    # cheaper than paying ~-(threshold) per touchdown for an honest
+    # trot below the threshold.
+    reward = torch.sum(
+        torch.clamp(last_air_time - threshold, min=0.0) * first_contact, dim=1
+    )
     cmd_norm = torch.norm(env.command_manager.get_command(command_name)[:, :2], dim=1)
     reward *= cmd_norm > cmd_threshold
     return reward
