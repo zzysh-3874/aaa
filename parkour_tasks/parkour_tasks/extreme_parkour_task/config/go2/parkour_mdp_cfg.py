@@ -405,10 +405,10 @@ class FlatStageOneRewardsCfg(TeacherRewardsCfg):
 
     # --- DreamWaQ-aligned rebalanced regularisers ---
     reward_action_rate = RewTerm(
-        func=rewards.reward_action_rate,
+        func=rewards.reward_action_rate_squared,
         weight=-0.01,
         params={
-            "asset_cfg": SceneEntityCfg("robot"),
+            "action_name": "joint_pos",
         },
     )
     reward_action_jerk = RewTerm(
