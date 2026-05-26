@@ -275,6 +275,71 @@ def reward_joint_power(
     return torch.sum(torch.abs(asset.data.applied_torque) * torch.abs(asset.data.joint_vel), dim=1)
 
 
+def reward_power_distribution(
+    env: ParkourManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """DreamWaQ-style cross-motor power dispersion penalty.
+
+    Computes ``Var_i(|tau_i * qdot_i|)`` across the 12 joints. A balanced
+    four-leg trot has roughly equal mechanical power across all motors so
+    the variance stays small. A three-legged gait (one leg permanently
+    suspended) leaves three joints at ~0 W while the other nine carry the
+    propulsion load, blowing up the variance and making this penalty
+    dominate the rest of the reward stack.
+
+    Used by DreamWaQ (Nahrendra et al., 2023) with weight ``-1e-5``;
+    paired with ``reward_joint_power`` (sum of |tau*qdot|) which already
+    handles total energy. The two together regularise both magnitude and
+    distribution of motor power.
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    power = torch.abs(asset.data.applied_torque) * torch.abs(asset.data.joint_vel)
+    return torch.var(power, dim=1)
+
+
+def reward_foot_clearance(
+    env: ParkourManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", body_names=".*_foot"),
+    target_height: float = -0.18,
+) -> torch.Tensor:
+    """DreamWaQ-style swing-foot clearance penalty.
+
+    Per foot:
+        height_error = (foot_z_body - target_height)^2
+        speed = |foot_vel_xy_body|
+        penalty = height_error * speed
+
+    Summed across the four feet. ``target_height`` is the desired foot z
+    position **in the base body frame** (negative below base). Foot vertical
+    error during the swing phase (high lateral speed) is penalised; during
+    stance (zero lateral speed) it has no effect. Encourages a clean swing
+    arc instead of dragging feet along the ground.
+
+    Adapted from DreamWaQ Go2 ``_reward_foot_clearance`` with weight ``-0.01``.
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    foot_ids = asset_cfg.body_ids
+    # World-frame quantities at body level (4 feet x 13 components: pos+quat+lin_vel+ang_vel)
+    foot_pos_w = asset.data.body_state_w[:, foot_ids, 0:3]
+    foot_vel_w = asset.data.body_state_w[:, foot_ids, 7:10]
+    base_pos_w = asset.data.root_state_w[:, 0:3].unsqueeze(1)
+    base_vel_w = asset.data.root_state_w[:, 7:10].unsqueeze(1)
+    base_quat_w = asset.data.root_state_w[:, 3:7].unsqueeze(1).expand(-1, foot_ids.numel() if hasattr(foot_ids, "numel") else len(foot_ids), -1)
+    # Translate to base origin
+    pos_rel_w = foot_pos_w - base_pos_w
+    vel_rel_w = foot_vel_w - base_vel_w
+    # Rotate world-frame vectors into body frame by inverse base rotation.
+    # quat_apply with conjugated quaternion gives world->body transform.
+    base_quat_conj = base_quat_w.clone()
+    base_quat_conj[..., 1:] = -base_quat_conj[..., 1:]
+    pos_b = quat_apply(base_quat_conj, pos_rel_w)
+    vel_b = quat_apply(base_quat_conj, vel_rel_w)
+    height_err = torch.square(pos_b[..., 2] - target_height)
+    lateral_speed = torch.norm(vel_b[..., :2], dim=-1)
+    return torch.sum(height_err * lateral_speed, dim=1)
+
+
 def reward_joint_power_gap_aware(
     env: ParkourManagerBasedRLEnv,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),

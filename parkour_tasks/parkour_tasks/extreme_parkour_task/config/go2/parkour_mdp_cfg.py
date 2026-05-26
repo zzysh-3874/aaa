@@ -352,32 +352,72 @@ class TeacherRewardsCfg:
 
 @configclass
 class FlatStageOneRewardsCfg(TeacherRewardsCfg):
-    """Stage-1 reward set for FlatParkour bootstrapping.
+    """Stage-1 reward set for FlatParkour bootstrapping (DreamWaQ-merged v2).
 
-    Inherits the Teacher reward stack but rebalances and adds a
-    ``feet_air_time`` term to break the "drag two hind legs along the
-    ground" failure mode we observed when training PIE from scratch with
-    bare TeacherRewardsCfg on flat terrain. The previous run reached an
-    apparent ``Train/mean_reward = +35`` but at play time the policy
-    pinned both rear calves at the +1.2 action limit and slid forward;
-    episode_length collapsed from ~970 in training to <200 at play.
+    History
+    -------
+    v1 (initial):  Teacher rewards + feet_air_time + dof_pos_limits + action_jerk.
+                   Trained model_500.pt - good walker on flat ground.
+    v2 (current, this class): keep model_500's signal structure but add
+                              DreamWaQ-style cross-motor power balancing,
+                              GapOnly-style goal_reached bonus, and widen
+                              collision body filter. The Stage 2a from
+                              model_14500 had degenerated into a 3-leg
+                              dragging gait that could not clear obstacles;
+                              v2 closes that failure mode.
 
-    Adapted from the Unitree Go2 rough-terrain reward set in IsaacLab
-    (``isaaclab_tasks.manager_based.locomotion.velocity.config.go2``):
+    Reward stack (relative to v1):
+    - DELETED ``reward_torques`` (-5e-5). DreamWaQ paper recommends
+      ``joint_power = sum |tau * qdot|`` instead because it directly
+      penalises mechanical energy; ``torques`` rewards a "lock-out and
+      drag" gait where the suspended leg has tau=0 but is still bent.
+    - ADDED ``reward_joint_power`` (-2e-5). DreamWaQ go2 default.
+    - ADDED ``reward_power_distribution`` (-1e-5). Var across the 12 motors
+      of |tau * qdot|. A balanced trot has ~equal motor power; a 3-leg
+      gait has 3 zero-power joints + 9 high-power joints, blowing up the
+      variance and dominating the reward stack.
+    - ADDED ``reward_goal_reached`` (+10.0). Sparse +10 each time
+      ``cur_goal_idx`` increments. Crossing obstacles now produces the
+      single largest positive reward source, forcing the policy to
+      actually traverse rather than stay in place collecting
+      tracking_goal_vel.
+    - ADDED ``reward_base_height_below_target`` (-1.0, target=0.30 m).
+      A 3-leg gait drops the body height; this dense penalty discourages
+      that posture continuously, complementing the discrete termination
+      cutoff at 0.20 m.
+    - ADDED ``reward_foot_clearance`` (-0.01, target=-0.18 m). DreamWaQ
+      go2 default. (foot_z_body - target)^2 * |foot_v_xy_body| sums over
+      4 feet. Encourages a clean swing arc and discourages dragging.
+    - REWEIGHTED ``reward_action_rate`` -0.03 -> -0.01 to match DreamWaQ.
+    - REWEIGHTED ``reward_action_jerk`` -0.005 -> -0.01 to match DreamWaQ.
+    - WIDENED ``reward_collision`` body filter from {calf, thigh} to
+      {base, hip, thigh, calf, head}. A 3-leg gait shifts COM and the
+      base / hip routinely brush hurdles and steps; including these
+      bodies makes the failure mode immediately visible to the policy.
 
-    Key changes vs Teacher:
-    - ``reward_lin_vel_z``  -1.0 -> -2.0  (stronger vertical motion penalty)
-    - ``reward_torques``    -1e-5 -> -5e-5 (mid-strength)
-    - ``reward_action_rate``-0.1  -> -0.03 (slightly relaxed)
-    - ``reward_feet_air_time`` weight=+0.1 with threshold=0.25 s, gated on
-      lin-vel command magnitude. Forces every foot to take real swings.
-    - ``reward_dof_pos_limits`` weight=-2.0. Directly punishes joint
-      angles that cross the soft limits; closes the "pin both rear
-      calves at +1.2 action limit" cheat path that the bare Teacher
-      reward tolerates.
-    - All other Teacher terms preserved verbatim.
+    All other Teacher terms (lin_vel_z, ang_vel_xy, orientation, dof_acc,
+    dof_error, hip_pos, feet_edge, feet_stumble, delta_torques,
+    tracking_goal_vel, tracking_yaw) are preserved unchanged.
     """
 
+    # --- delete torques (replaced by joint_power below) ---
+    reward_torques = None
+
+    # --- DreamWaQ-aligned rebalanced regularisers ---
+    reward_action_rate = RewTerm(
+        func=rewards.reward_action_rate,
+        weight=-0.01,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+        },
+    )
+    reward_action_jerk = RewTerm(
+        func=rewards.reward_action_jerk,
+        weight=-0.01,
+        params={
+            "action_name": "joint_pos",
+        },
+    )
     reward_lin_vel_z = RewTerm(
         func=rewards.reward_lin_vel_z,
         weight=-2.0,
@@ -386,20 +426,43 @@ class FlatStageOneRewardsCfg(TeacherRewardsCfg):
             "parkour_name": "base_parkour",
         },
     )
-    reward_torques = RewTerm(
-        func=rewards.reward_torques,
-        weight=-5.0e-5,
+
+    # --- new DreamWaQ-style energy regularisers ---
+    reward_joint_power = RewTerm(
+        func=rewards.reward_joint_power,
+        weight=-2.0e-5,
         params={
             "asset_cfg": SceneEntityCfg("robot"),
         },
     )
-    reward_action_rate = RewTerm(
-        func=rewards.reward_action_rate,
-        weight=-0.03,
+    reward_power_distribution = RewTerm(
+        func=rewards.reward_power_distribution,
+        weight=-1.0e-5,
         params={
             "asset_cfg": SceneEntityCfg("robot"),
         },
     )
+
+    # --- DreamWaQ foot-swing arc and base height ---
+    reward_foot_clearance = RewTerm(
+        func=rewards.reward_foot_clearance,
+        weight=-0.01,
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot"),
+            "target_height": -0.18,
+        },
+    )
+    reward_base_height_below_target = RewTerm(
+        func=rewards.reward_base_height_below_target,
+        weight=-1.0,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "sensor_cfg": SceneEntityCfg("height_scanner"),
+            "target_height": 0.30,
+        },
+    )
+
+    # --- v1 anti-cheat retentions ---
     reward_feet_air_time = RewTerm(
         func=rewards.reward_feet_air_time,
         weight=0.1,
@@ -416,34 +479,24 @@ class FlatStageOneRewardsCfg(TeacherRewardsCfg):
             "asset_cfg": SceneEntityCfg("robot"),
         },
     )
-    # Penalise the 2nd-order difference of action (jerk). Closes the
-    # "small-amplitude high-frequency jitter" loophole that bare
-    # reward_action_rate (L2 of a_t - a_{t-1}) leaves open: a policy
-    # that flips action sign every step at small amplitude pays only
-    # 0.001/step of action_rate but produces a visibly jittery gait.
-    # Penalising jerk (a_t - 2*a_{t-1} + a_{t-2}) stays close to zero
-    # for smooth walking but blows up for sign-flipping jitter.
-    reward_action_jerk = RewTerm(
-        func=rewards.reward_action_jerk,
-        weight=-0.005,
+
+    # --- GapOnly-style sparse traversal bonus ---
+    reward_goal_reached = RewTerm(
+        func=rewards.reward_goal_reached,
+        weight=10.0,
         params={
-            "action_name": "joint_pos",
+            "parkour_name": "base_parkour",
         },
     )
-    # Drop "base" from collision body filter: a base contact means the
-    # robot has fallen over, which is handled by the termination's roll /
-    # pitch / height cutoffs and resets the episode immediately. Letting
-    # reward_collision also fire on base just adds redundant gradient
-    # noise for the same event. Keep calf/thigh contact penalised because
-    # those are the legitimate "leg hit something" signals during walking
-    # and parkour.
+
+    # --- widen collision filter to include base/hip/head ---
     reward_collision = RewTerm(
         func=rewards.reward_collision,
         weight=-10.0,
         params={
             "sensor_cfg": SceneEntityCfg(
                 "contact_forces",
-                body_names=[".*_calf", ".*_thigh"],
+                body_names=["base", ".*_hip", ".*_thigh", ".*_calf", "Head_upper", "Head_lower"],
             ),
         },
     )
