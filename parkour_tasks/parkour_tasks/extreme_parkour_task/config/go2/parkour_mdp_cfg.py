@@ -411,6 +411,23 @@ class FlatStageOneRewardsCfg(TeacherRewardsCfg):
             "action_name": "joint_pos",
         },
     )
+    # Turn down the dominant positive reward. Teacher uses 1.5 because its
+    # task design has goals on the centerline (target_yaw ~ 0) so chasing
+    # goal velocity does not conflict with anything else. Our stage 1 now
+    # opens y_range to ±0.2 so target_yaw is ±12 deg; if tracking_goal_vel
+    # stays at 1.5 it dominates the reward stack and the policy ignores
+    # everything else (orientation, power_distribution, action smoothness)
+    # while sprinting toward the goal. Lowering to 1.0 puts it on equal
+    # footing with the regularizers and lets the policy actually learn a
+    # clean trot rather than a crash-toward-goal gait.
+    reward_tracking_goal_vel = RewTerm(
+        func=rewards.reward_tracking_goal_vel,
+        weight=1.0,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "parkour_name": "base_parkour",
+        },
+    )
     reward_action_jerk = RewTerm(
         func=rewards.reward_action_jerk,
         weight=-0.01,

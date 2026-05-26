@@ -744,6 +744,15 @@ class UnitreeGo2PIEFlatParkourEnvCfg(UnitreeGo2PIEFullParkourEnvCfg):
                     sub_terrain.apply_roughness = False
                 if hasattr(sub_terrain, "noise_range"):
                     sub_terrain.noise_range = (0.0, 0.0)
+                # Open up goal y offset so the policy actually learns to
+                # turn toward goals instead of sliding straight along +x.
+                # Teacher uses (-0.4, 0.4); we use (-0.2, 0.2) as a
+                # halfway compromise: target_yaw can reach ~12 deg, which
+                # is enough that reward_tracking_yaw becomes a real
+                # gradient signal but well below Teacher's ~22 deg so
+                # walking + turning can still both be learned at once.
+                if hasattr(sub_terrain, "y_range") and key == "parkour_flat":
+                    sub_terrain.y_range = (-0.2, 0.2)
             # Narrow difficulty so the curriculum resampler always gives easy
             # goals; no hidden bumps mean difficulty doesn't really matter
             # for parkour_flat, but we keep it bounded for clarity.
