@@ -489,7 +489,7 @@ class FlatStageOneRewardsCfg(TeacherRewardsCfg):
     # --- v1 anti-cheat retentions ---
     reward_feet_air_time = RewTerm(
         func=rewards.reward_feet_air_time,
-        weight=0.1,
+        weight=0.75,
         params={
             "command_name": "base_velocity",
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot"),
