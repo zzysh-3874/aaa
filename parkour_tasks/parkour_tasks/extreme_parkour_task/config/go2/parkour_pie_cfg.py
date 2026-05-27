@@ -615,17 +615,17 @@ class UnitreeGo2PIEFullParkourStage2WarmEnvCfg(UnitreeGo2PIEFullParkourEnvCfg):
         # hurdle (base z ~0.30 m, robot stuck pushing forward, accumulating
         # tracking_goal_vel reward without progressing). This term resets
         # the episode when any of base / hip / thigh / head sustains a
-        # contact force above 30 N - i.e. genuinely stuck pushing into an
-        # obstacle. Threshold raised from 5 N to 30 N so that a brief
-        # brush of the belly when clearing a hurdle is tolerated; only
-        # persistent contact (~50-100 N when wedged) triggers a reset.
+        # contact force above 50 N - i.e. genuinely stuck pushing into an
+        # obstacle. Threshold 50 N tolerates the brief landing impulse of
+        # clearing a hurdle (transient ~30-40 N) while still catching
+        # persistent wedging (50-100 N).
         from isaaclab.managers import TerminationTermCfg as _DoneTerm
         from parkour_isaaclab.envs.mdp import terminations as _term_funcs
         self.terminations.illegal_body_contact = _DoneTerm(
             func=_term_funcs.illegal_body_contact,
             time_out=False,
             params={
-                "threshold": 30.0,
+                "threshold": 50.0,
                 "sensor_cfg": SceneEntityCfg(
                     "contact_forces",
                     body_names=[
@@ -696,6 +696,14 @@ class UnitreeGo2PIEFullParkourEasyEnvCfg(UnitreeGo2PIEFullParkourStage2WarmEnvCf
         if parkour is not None:
             parkour.incline_height = "0.05 + 0.05*difficulty"
             parkour.last_incline_height = "0.05 + 0.05*difficulty"
+
+        # Loosen the "reached goal" radius from default 0.2 m to 0.35 m so a
+        # Stage 1 walker (which has only seen y_range=(-0.2, 0.2)) does not
+        # have to perfectly aim each goal during the Easy finetune. Larger
+        # radius means: more goal_reached bonus per episode, less penalty
+        # for slight off-line tracking, faster terrain_levels promotion.
+        # Stage 2b (full difficulty) can drop it back to 0.2.
+        self.parkours.base_parkour.next_goal_threshold = 0.35
 
 
 @configclass
