@@ -609,32 +609,13 @@ class UnitreeGo2PIEFullParkourStage2WarmEnvCfg(UnitreeGo2PIEFullParkourEnvCfg):
         # Stage 2b can re-open the heading range.
         self.commands.base_velocity.ranges.heading = (0.0, 0.0)
 
-        # Add an explicit illegal-body-contact termination. The default
-        # ``terminate_episode`` only resets when world-frame z < 0.20 m,
-        # which never fires when the robot is wedged against a 10-15 cm
-        # hurdle (base z ~0.30 m, robot stuck pushing forward, accumulating
-        # tracking_goal_vel reward without progressing). This term resets
-        # the episode when any of base / hip / thigh / head sustains a
-        # contact force above 50 N - i.e. genuinely stuck pushing into an
-        # obstacle. Threshold 50 N tolerates the brief landing impulse of
-        # clearing a hurdle (transient ~30-40 N) while still catching
-        # persistent wedging (50-100 N).
-        from isaaclab.managers import TerminationTermCfg as _DoneTerm
-        from parkour_isaaclab.envs.mdp import terminations as _term_funcs
-        self.terminations.illegal_body_contact = _DoneTerm(
-            func=_term_funcs.illegal_body_contact,
-            time_out=False,
-            params={
-                "threshold": 50.0,
-                "sensor_cfg": SceneEntityCfg(
-                    "contact_forces",
-                    body_names=[
-                        "base", ".*_hip", ".*_thigh",
-                        "Head_upper", "Head_lower",
-                    ],
-                ),
-            },
-        )
+        # NOTE: illegal_body_contact termination removed during v4 finetune
+        # because the 50 N threshold was firing on legitimate hurdle landings
+        # and forcing the policy to over-cushion (curl calf joints heavily
+        # to soak up impact). Without this term, transient body contact
+        # during obstacle traversal is no longer a hard failure - the
+        # collision reward (-10.0 weight) still penalises sustained contact
+        # while letting the policy keep its momentum through landings.
 
         # Relax pitch cutoff from 1.0 rad to 1.4 rad (~80 deg). Successful
         # traversal of a 30 cm hurdle peaks at ~0.5-0.7 rad pitch in flight,

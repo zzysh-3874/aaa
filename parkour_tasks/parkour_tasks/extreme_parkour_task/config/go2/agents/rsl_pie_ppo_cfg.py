@@ -266,9 +266,9 @@ class ParkourRslRlPIEFullStage2WarmActorCriticCfg(ParkourRslRlPIEFullParkourActo
 
 @configclass
 class UnitreeGo2PIEFullStage2WarmPPORunnerCfg(UnitreeGo2PIEFullParkourPPORunnerCfg):
-    """Stage-2 warm-up runner: clip_actions=0.8, save_interval=500."""
+    """Stage-2 warm-up runner: clip_actions=0.8, save_interval=1000."""
 
-    save_interval = 500
+    save_interval = 1000
     clip_actions = 0.8
     policy = ParkourRslRlPIEFullStage2WarmActorCriticCfg()
 

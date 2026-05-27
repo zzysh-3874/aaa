@@ -401,7 +401,19 @@ class FlatStageOneRewardsCfg(TeacherRewardsCfg):
     """
 
     # --- delete torques (replaced by joint_power below) ---
-    reward_torques = None
+    # NOTE: brought torques back at Teacher's -1e-5 weight after the v4
+    # finetune showed calf joints curling well past default (joint power
+    # alone is not strong enough to keep posture clean during obstacle
+    # traversal). Both joint_power and torques run together: joint_power
+    # penalises high motor work, torques penalises absolute torque -
+    # both modes show up during over-bent calf actuation.
+    reward_torques = RewTerm(
+        func=rewards.reward_torques,
+        weight=-1.0e-5,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+        },
+    )
 
     # --- DreamWaQ-aligned rebalanced regularisers ---
     reward_action_rate = RewTerm(
@@ -506,11 +518,11 @@ class FlatStageOneRewardsCfg(TeacherRewardsCfg):
     # --- v1 anti-cheat retentions ---
     reward_feet_air_time = RewTerm(
         func=rewards.reward_feet_air_time,
-        weight=0.5,
+        weight=0.2,
         params={
             "command_name": "base_velocity",
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot"),
-            "threshold": 0.3,
+            "threshold": 0.15,
         },
     )
     reward_dof_pos_limits = RewTerm(
@@ -524,20 +536,26 @@ class FlatStageOneRewardsCfg(TeacherRewardsCfg):
     # --- GapOnly-style sparse traversal bonus ---
     reward_goal_reached = RewTerm(
         func=rewards.reward_goal_reached,
-        weight=10.0,
+        weight=1.0,
         params={
             "parkour_name": "base_parkour",
         },
     )
 
     # --- widen collision filter to include base/hip/head ---
+    # Removed .*_calf during v5 finetune: calf contact with hurdle / step
+    # tops is unavoidable when traversing obstacles. Penalising it made
+    # the policy curl thigh-calf into a tight crouch (visible in the
+    # iter 11000 ckpt) to keep calf clear, defeating the point. Keeping
+    # base / hip / thigh / head only catches genuine "leaning on an
+    # obstacle" failures.
     reward_collision = RewTerm(
         func=rewards.reward_collision,
         weight=-10.0,
         params={
             "sensor_cfg": SceneEntityCfg(
                 "contact_forces",
-                body_names=["base", ".*_hip", ".*_thigh", ".*_calf", "Head_upper", "Head_lower"],
+                body_names=["base", ".*_hip", ".*_thigh", "Head_upper", "Head_lower"],
             ),
         },
     )
