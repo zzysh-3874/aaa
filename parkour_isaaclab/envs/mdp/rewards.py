@@ -808,3 +808,113 @@ def reward_action_jerk(
     a_t2 = history[:, -3]
     jerk = a_t - 2.0 * a_t1 + a_t2
     return torch.sum(torch.square(jerk), dim=1)
+
+
+# =============================================================================
+# Flat-only variants of regularizer rewards.
+# These wrap the base regularizer functions and zero out the per-env reward
+# when the env is currently on a non-parkour_flat sub-terrain. Used by the
+# Stage 2 finetune so that obstacle traversal (gap / hurdle / step / parkour
+# corridors) does not get penalised for the temporarily large joint power /
+# bent posture / low base height that successful obstacle clearing requires.
+# Pattern mirrors the Teacher-style ``reward_lin_vel_z`` and
+# ``reward_orientation`` already in this file.
+# =============================================================================
+
+
+def reward_joint_power_flat_only(
+    env: ParkourManagerBasedRLEnv,
+    parkour_name: str = "base_parkour",
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Joint power penalty, zeroed on non-parkour_flat sub-terrains."""
+    parkour_event: ParkourEvent = env.parkour_manager.get_term(parkour_name)
+    terrain_names = parkour_event.env_per_terrain_name
+    asset: Articulation = env.scene[asset_cfg.name]
+    rew = torch.sum(torch.abs(asset.data.applied_torque) * torch.abs(asset.data.joint_vel), dim=1)
+    rew[(terrain_names != "parkour_flat")[:, -1]] = 0.0
+    return rew
+
+
+def reward_power_distribution_flat_only(
+    env: ParkourManagerBasedRLEnv,
+    parkour_name: str = "base_parkour",
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Cross-motor power dispersion penalty, zeroed on non-parkour_flat sub-terrains."""
+    parkour_event: ParkourEvent = env.parkour_manager.get_term(parkour_name)
+    terrain_names = parkour_event.env_per_terrain_name
+    asset: Articulation = env.scene[asset_cfg.name]
+    power = torch.abs(asset.data.applied_torque) * torch.abs(asset.data.joint_vel)
+    rew = torch.var(power, dim=1)
+    rew[(terrain_names != "parkour_flat")[:, -1]] = 0.0
+    return rew
+
+
+def reward_foot_clearance_flat_only(
+    env: ParkourManagerBasedRLEnv,
+    parkour_name: str = "base_parkour",
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", body_names=".*_foot"),
+    target_height: float = -0.18,
+) -> torch.Tensor:
+    """DreamWaQ swing-foot clearance penalty, zeroed on non-parkour_flat sub-terrains."""
+    parkour_event: ParkourEvent = env.parkour_manager.get_term(parkour_name)
+    terrain_names = parkour_event.env_per_terrain_name
+    asset: Articulation = env.scene[asset_cfg.name]
+    foot_ids = asset_cfg.body_ids
+    foot_pos_w = asset.data.body_state_w[:, foot_ids, 0:3]
+    foot_vel_w = asset.data.body_state_w[:, foot_ids, 7:10]
+    base_pos_w = asset.data.root_state_w[:, 0:3].unsqueeze(1)
+    base_vel_w = asset.data.root_state_w[:, 7:10].unsqueeze(1)
+    n_feet = foot_ids.numel() if hasattr(foot_ids, "numel") else len(foot_ids)
+    base_quat_w = asset.data.root_state_w[:, 3:7].unsqueeze(1).expand(-1, n_feet, -1)
+    pos_rel_w = foot_pos_w - base_pos_w
+    vel_rel_w = foot_vel_w - base_vel_w
+    base_quat_conj = base_quat_w.clone()
+    base_quat_conj[..., 1:] = -base_quat_conj[..., 1:]
+    pos_b = quat_apply(base_quat_conj, pos_rel_w)
+    vel_b = quat_apply(base_quat_conj, vel_rel_w)
+    height_err = torch.square(pos_b[..., 2] - target_height)
+    lateral_speed = torch.norm(vel_b[..., :2], dim=-1)
+    rew = torch.sum(height_err * lateral_speed, dim=1)
+    rew[(terrain_names != "parkour_flat")[:, -1]] = 0.0
+    return rew
+
+
+def reward_base_height_below_target_flat_only(
+    env: ParkourManagerBasedRLEnv,
+    parkour_name: str = "base_parkour",
+    target_height: float = 0.30,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    sensor_cfg: SceneEntityCfg = SceneEntityCfg("height_scanner"),
+) -> torch.Tensor:
+    """Base height below target penalty, zeroed on non-parkour_flat sub-terrains."""
+    parkour_event: ParkourEvent = env.parkour_manager.get_term(parkour_name)
+    terrain_names = parkour_event.env_per_terrain_name
+    asset: Articulation = env.scene[asset_cfg.name]
+    ray_sensor = env.scene.sensors[sensor_cfg.name]
+    terrain_z = torch.median(ray_sensor.data.ray_hits_w[..., 2], dim=1).values
+    terrain_z = torch.nan_to_num(terrain_z, nan=0.0, posinf=0.0, neginf=0.0)
+    base_height = asset.data.root_state_w[:, 2] - terrain_z
+    rew = torch.clamp(target_height - base_height, min=0.0)
+    rew[(terrain_names != "parkour_flat")[:, -1]] = 0.0
+    return rew
+
+
+def reward_dof_pos_limits_flat_only(
+    env: ParkourManagerBasedRLEnv,
+    parkour_name: str = "base_parkour",
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Joint soft-limit excess penalty, zeroed on non-parkour_flat sub-terrains."""
+    parkour_event: ParkourEvent = env.parkour_manager.get_term(parkour_name)
+    terrain_names = parkour_event.env_per_terrain_name
+    asset: Articulation = env.scene[asset_cfg.name]
+    joint_pos = asset.data.joint_pos[:, asset_cfg.joint_ids]
+    soft_lower = asset.data.soft_joint_pos_limits[:, asset_cfg.joint_ids, 0]
+    soft_upper = asset.data.soft_joint_pos_limits[:, asset_cfg.joint_ids, 1]
+    out_of_lower = (soft_lower - joint_pos).clamp(min=0.0)
+    out_of_upper = (joint_pos - soft_upper).clamp(min=0.0)
+    rew = torch.sum(out_of_lower + out_of_upper, dim=1)
+    rew[(terrain_names != "parkour_flat")[:, -1]] = 0.0
+    return rew
