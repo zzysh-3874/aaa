@@ -481,50 +481,37 @@ class FlatStageOneRewardsCfg(TeacherRewardsCfg):
     )
 
     # --- new DreamWaQ-style energy regularisers ---
-    # NOTE v6: switched to flat_only variants. Joint power and power
-    # distribution should not be penalised when the policy is mid-air
-    # over a hurdle / step / gap - obstacle clearance legitimately needs
-    # bursts of high motor power and asymmetric per-joint loading. Only
-    # parkour_flat sub-terrain enforces these regularisers.
     reward_joint_power = RewTerm(
-        func=rewards.reward_joint_power_flat_only,
+        func=rewards.reward_joint_power,
         weight=-2.0e-5,
         params={
             "asset_cfg": SceneEntityCfg("robot"),
-            "parkour_name": "base_parkour",
         },
     )
     reward_power_distribution = RewTerm(
-        func=rewards.reward_power_distribution_flat_only,
+        func=rewards.reward_power_distribution,
         weight=-1.0e-5,
         params={
             "asset_cfg": SceneEntityCfg("robot"),
-            "parkour_name": "base_parkour",
         },
     )
 
     # --- DreamWaQ foot-swing arc and base height ---
-    # NOTE v6: flat_only variants. foot_clearance target=-0.18 is the
-    # nominal trot foot height; on hurdle / step the policy MUST lift
-    # higher than that. base_height target=0.30 is also the nominal
-    # standing height; gap landings dip below briefly. Both off-flat.
     reward_foot_clearance = RewTerm(
-        func=rewards.reward_foot_clearance_flat_only,
+        func=rewards.reward_foot_clearance,
         weight=-0.01,
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot"),
             "target_height": -0.18,
-            "parkour_name": "base_parkour",
         },
     )
     reward_base_height_below_target = RewTerm(
-        func=rewards.reward_base_height_below_target_flat_only,
+        func=rewards.reward_base_height_below_target,
         weight=-1.0,
         params={
             "asset_cfg": SceneEntityCfg("robot"),
             "sensor_cfg": SceneEntityCfg("height_scanner"),
             "target_height": 0.30,
-            "parkour_name": "base_parkour",
         },
     )
 
@@ -539,11 +526,10 @@ class FlatStageOneRewardsCfg(TeacherRewardsCfg):
         },
     )
     reward_dof_pos_limits = RewTerm(
-        func=rewards.reward_dof_pos_limits_flat_only,
+        func=rewards.reward_dof_pos_limits,
         weight=-2.0,
         params={
             "asset_cfg": SceneEntityCfg("robot"),
-            "parkour_name": "base_parkour",
         },
     )
 

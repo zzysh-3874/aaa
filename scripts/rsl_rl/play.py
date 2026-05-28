@@ -35,6 +35,12 @@ parser.add_argument(
     default=False,
     help="Pop up an OpenCV window with the live depth image grid (8-env tile).",
 )
+parser.add_argument(
+    "--follow_robot",
+    action="store_true",
+    default=False,
+    help="Lock the Isaac Sim viewport camera to follow env 0's robot.",
+)
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
 # append AppLauncher cli args
@@ -92,8 +98,11 @@ def main():
             print("[INFO] --show_depth: enabled OpenCV depth grid window.")
         except AttributeError:
             print("[WARN] --show_depth requested but env_cfg has no observations.depth_camera.depth term.")
-        # Snap the Isaac Sim viewer onto env 0's robot so the depth grid's
-        # "env 0" tile matches what you're looking at in the simulator.
+
+    # Lock the Isaac Sim viewport to follow env 0's robot. This is independent
+    # of --show_depth so you can have one or both. Use --follow_robot when
+    # you want a chase camera on a single env without the OpenCV depth grid.
+    if args_cli.follow_robot or args_cli.show_depth:
         try:
             from isaaclab.envs import ViewerCfg
             env_cfg.viewer = ViewerCfg(
@@ -103,7 +112,7 @@ def main():
                 origin_type="asset_root",
                 env_index=0,
             )
-            print("[INFO] --show_depth: viewer locked to env 0 robot.")
+            print("[INFO] viewer locked to env 0 robot.")
         except Exception as exc:
             print(f"[WARN] viewer override failed: {exc}")
 
