@@ -49,14 +49,25 @@ class ParkourViewportCameraController(ViewportCameraController):
 
         self._appwindow = omni.appwindow.get_default_app_window()
         self._input = carb.input.acquire_input_interface()
-        self._keyboard = self._appwindow.get_keyboard()
-        self.free_cam_trigger = False 
+        self.free_cam_trigger = False
         self.is_free_cam = False
 
-        self._keyboard_sub = self._input.subscribe_to_keyboard_events(
-            self._keyboard,
-            lambda event, *args, obj=weakref.proxy(self): obj._on_keyboard_event(event, *args),
-        )
+        # In headless mode (no default app window / keyboard) the keyboard
+        # interface is unavailable. Acquiring it raises
+        # ``AttributeError: 'NoneType' object has no attribute 'get_keyboard'``,
+        # which previously crashed env creation for headless eval / audit runs
+        # whenever the env cfg enabled the viewport controller (e.g. PLAY/EVAL
+        # cfgs with debug_vis). Guard the keyboard subscription so the camera
+        # controller still works for camera tracking; only the interactive
+        # keyboard shortcuts are skipped when there is no window.
+        self._keyboard = self._appwindow.get_keyboard() if self._appwindow is not None else None
+        if self._keyboard is not None:
+            self._keyboard_sub = self._input.subscribe_to_keyboard_events(
+                self._keyboard,
+                lambda event, *args, obj=weakref.proxy(self): obj._on_keyboard_event(event, *args),
+            )
+        else:
+            self._keyboard_sub = None
         # self._mouse = self._appwindow.get_mouse()
         # subscribe to post update event so that camera view can be updated at each rendering step
         app_interface = omni.kit.app.get_app_interface()
