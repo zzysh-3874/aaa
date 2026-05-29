@@ -270,7 +270,12 @@ def accumulate_stats(
 ) -> None:
     stats.samples += 1
     stats.actor_obs_manual_sq += torch.square(builtin_actor_obs - manual_actor_obs).mean().item()
-    stats.actor_obs_prefix_sq += torch.square(builtin_actor_obs[:, :45] - policy_obs).mean().item()
+    # The actor obs is laid out as [policy_obs (proprio), *estimator_features].
+    # Older PIE configs used proprio_dim=45; FullParkour uses 47. Derive the
+    # prefix length from the actual policy_obs tensor so this audit works for
+    # any PIE proprio dimension without a hardcoded constant.
+    policy_dim = policy_obs.shape[-1]
+    stats.actor_obs_prefix_sq += torch.square(builtin_actor_obs[:, :policy_dim] - policy_obs).mean().item()
     stats.z_vs_mu_sq += torch.square(predictions["z"] - predictions["z_mu"]).mean().item()
     if not all(torch.isfinite(value).all().item() for value in predictions.values()):
         stats.finite_failures += 1
@@ -641,9 +646,13 @@ def print_summary(stats: EstimatorStats, runner: OnPolicyRunnerWithExtractor) ->
 def print_actor_input_weight_norms(runner: OnPolicyRunnerWithExtractor) -> None:
     first_layer = runner.alg.policy.actor[0]
     weight = first_layer.weight.detach()
-    offset = 45
+    # The actor input is [policy_obs (proprio), *estimator_features]. Derive the
+    # proprio prefix length from the actor's input width minus the estimator
+    # feature dims, so this works for any proprio_dim (45 older, 47 FullParkour).
+    feature_dim_total = sum(FEATURE_DIMS[key] for key in runner.alg.pie_actor_feature_keys)
+    offset = weight.shape[1] - feature_dim_total
     emit("\n=== ACTOR FIRST-LAYER INPUT WEIGHT NORMS ===")
-    emit(f"{'policy':<8} mean_col_l2={weight[:, :45].norm(dim=0).mean().item():.6f}")
+    emit(f"{'policy':<8} mean_col_l2={weight[:, :offset].norm(dim=0).mean().item():.6f}")
     for key in runner.alg.pie_actor_feature_keys:
         dim = FEATURE_DIMS[key]
         segment = weight[:, offset : offset + dim]
