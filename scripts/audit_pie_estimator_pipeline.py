@@ -78,6 +78,12 @@ class EstimatorStats:
     height_sq: float = 0.0
     next_proprio_sq: float = 0.0
     next_proprio_count: int = 0
+    # Per-terrain-type h_f and height error accumulation. Each value is
+    # [sum_squared_error, sample_count] so we can report RMSE broken down by
+    # sub-terrain (flat vs step vs gap ...). This confirms whether the foot
+    # clearance estimate degrades specifically on stepped/edged terrains.
+    h_f_sq_by_terrain: dict[str, list[float]] | None = None
+    height_sq_by_terrain: dict[str, list[float]] | None = None
     hidden_reset_checks: int = 0
     hidden_reset_max: float = 0.0
     finite_failures: int = 0
@@ -161,6 +167,8 @@ def main() -> None:
     stats = EstimatorStats(
         v_sq=torch.zeros(3, device=env.device),
         h_f_sq=torch.zeros(4, device=env.device),
+        h_f_sq_by_terrain={},
+        height_sq_by_terrain={},
         feature_abs_sum={key: 0.0 for key in runner.alg.pie_actor_feature_keys},
         feature_max_abs={key: 0.0 for key in runner.alg.pie_actor_feature_keys},
         feature_clip_frac_sum={key: 0.0 for key in runner.alg.pie_actor_feature_keys},
@@ -203,6 +211,7 @@ def main() -> None:
                 prepared_features,
                 manual_actor_obs,
                 builtin_actor_obs,
+                env=env,
             )
 
         runner.alg.reset_pie_actor_hidden(dones)
@@ -255,6 +264,25 @@ def print_config(env, agent_cfg, runner: OnPolicyRunnerWithExtractor) -> None:
     emit(f"expected_feature_dims={FEATURE_DIMS}")
 
 
+def _env_terrain_names(env):
+    """Return a numpy array of per-env sub-terrain names, or None if unavailable.
+
+    Reads ``parkour_event.env_per_terrain_name`` (shape (num_envs, 1) of str)
+    via the unwrapped env's parkour manager. Used to break down estimator error
+    by terrain type.
+    """
+    try:
+        unwrapped = getattr(env, "unwrapped", env)
+        parkour_event = unwrapped.parkour_manager.get_term("base_parkour")
+        names = parkour_event.env_per_terrain_name
+    except Exception:
+        return None
+    import numpy as np
+
+    names = np.asarray(names).reshape(-1)
+    return names
+
+
 def accumulate_stats(
     stats: EstimatorStats,
     runner: OnPolicyRunnerWithExtractor,
@@ -267,6 +295,7 @@ def accumulate_stats(
     prepared_features: list[torch.Tensor],
     manual_actor_obs: torch.Tensor,
     builtin_actor_obs: torch.Tensor,
+    env=None,
 ) -> None:
     stats.samples += 1
     stats.actor_obs_manual_sq += torch.square(builtin_actor_obs - manual_actor_obs).mean().item()
@@ -288,6 +317,25 @@ def accumulate_stats(
     stats.v_sq += torch.square(predictions["v_hat"] - targets["base_velocity"]).mean(dim=0)
     stats.h_f_sq += torch.square(predictions["h_f_hat"] - targets["foot_clearance"]).mean(dim=0)
     stats.height_sq += torch.square(predictions["height_hat"] - targets["height_scan"]).mean().item()
+
+    # Per-terrain breakdown: group the foot-clearance and height-scan squared
+    # error by each env's current sub-terrain so we can see whether h_f / height
+    # estimation degrades specifically on stepped / edged terrains vs flat.
+    if env is not None and stats.h_f_sq_by_terrain is not None:
+        terrain_names = _env_terrain_names(env)
+        if terrain_names is not None:
+            h_f_err = torch.square(predictions["h_f_hat"] - targets["foot_clearance"]).mean(dim=-1)
+            height_err = torch.square(predictions["height_hat"] - targets["height_scan"]).mean(dim=-1)
+            for name in set(terrain_names.tolist()):
+                sel = torch.from_numpy(terrain_names == name).to(h_f_err.device)
+                if sel.any():
+                    hf_acc = stats.h_f_sq_by_terrain.setdefault(name, [0.0, 0.0])
+                    hf_acc[0] += h_f_err[sel].sum().item()
+                    hf_acc[1] += int(sel.sum().item())
+                    ht_acc = stats.height_sq_by_terrain.setdefault(name, [0.0, 0.0])
+                    ht_acc[0] += height_err[sel].sum().item()
+                    ht_acc[1] += int(sel.sum().item())
+
     mask = ~dones.bool().reshape(-1)
     if mask.any():
         stats.next_proprio_sq += torch.square(predictions["next_proprio_hat"][mask] - next_policy_obs[mask]).mean().item()
@@ -583,6 +631,16 @@ def print_summary(stats: EstimatorStats, runner: OnPolicyRunnerWithExtractor) ->
     )
     emit(f"height_hat_rmse={(stats.height_sq / denom) ** 0.5:.5f}")
     emit(f"next_proprio_hat_rmse={(stats.next_proprio_sq / next_denom) ** 0.5:.5f}")
+
+    if stats.h_f_sq_by_terrain:
+        emit("\n=== PER-TERRAIN h_f / height RMSE ===")
+        emit(f"{'terrain':<16} | {'h_f_rmse':>9} | {'height_rmse':>11} | {'samples':>8}")
+        for name in sorted(stats.h_f_sq_by_terrain):
+            hf_sum, hf_cnt = stats.h_f_sq_by_terrain[name]
+            hf_rmse = (hf_sum / hf_cnt) ** 0.5 if hf_cnt > 0 else float("nan")
+            ht_sum, ht_cnt = stats.height_sq_by_terrain.get(name, [0.0, 0.0])
+            ht_rmse = (ht_sum / ht_cnt) ** 0.5 if ht_cnt > 0 else float("nan")
+            emit(f"{name:<16} | {hf_rmse:9.5f} | {ht_rmse:11.5f} | {int(hf_cnt):8d}")
 
     emit("\n=== ACTOR FEATURE STATS ===")
     emit("feature | mean_abs | max_abs | clip_frac")
