@@ -294,6 +294,25 @@ gym.register(
     },
 )
 
+# Front-fast variant: identical to Stage2Warm (same peak obstacle sizes at
+# difficulty=1) but every sub-terrain difficulty formula is remapped with a
+# two-slope knee at terrain level 4 (knee_value=0.6): obstacles grow FAST
+# through the early levels the warm-start policy has already mastered, then
+# grow SLOWLY above level 4 where the genuinely hard, new terrain begins.
+# Use this to fine-tune a walker (e.g. easy_v5/model_19000 that reached
+# ~level 4) so it blows past the easy region and gets a gentle ramp exactly
+# where the linear Stage2Warm run diverged. Final (difficulty=1) target is
+# unchanged.
+gym.register(
+    id="Isaac-PIE-FullParkour-Stage2WarmFrontFast-Unitree-Go2-v0",
+    entry_point="parkour_isaaclab.envs:ParkourManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.parkour_pie_cfg:UnitreeGo2PIEFullParkourStage2WarmFrontFastEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_pie_ppo_cfg:UnitreeGo2PIEFullStage2WarmPPORunnerCfg",
+    },
+)
+
 gym.register(
     id="Isaac-PIE-FlatParkour-Unitree-Go2-v0",
     entry_point="parkour_isaaclab.envs:ParkourManagerBasedRLEnv",

@@ -627,6 +627,141 @@ class UnitreeGo2PIEFullParkourStage2WarmEnvCfg(UnitreeGo2PIEFullParkourEnvCfg):
         self.terminations.total_terminates.params["max_pitch"] = 1.4
 
 
+def _remap_token_knee(knee_level: int, knee_value: float, num_rows: int) -> str:
+    """Build a two-slope piecewise remap expression for ``difficulty``.
+
+    ``g(d) = (knee_value / d_knee) * d``                 for d <= d_knee
+    ``g(d) = knee_value + slope_hi * (d - d_knee)``       for d >  d_knee
+
+    with ``d_knee = knee_level/(num_rows-1)`` and
+    ``slope_hi = (1-knee_value)/(1-d_knee)``. Anchors ``g(0)=0`` and
+    ``g(1)=1`` are preserved. ``knee_value > d_knee`` => fast-early/slow-late;
+    ``knee_value < d_knee`` => slow-early/fast-late; ``== d_knee`` => linear.
+    """
+    d_knee = knee_level / (num_rows - 1)
+    slope_lo = knee_value / d_knee
+    slope_hi = (1.0 - knee_value) / (1.0 - d_knee)
+    return (
+        f"({slope_lo:.12g}*difficulty if difficulty<={d_knee:.12g} "
+        f"else ({knee_value:.12g}+{slope_hi:.12g}*(difficulty-{d_knee:.12g})))"
+    )
+
+
+def _reshape_difficulty_curve_knee(
+    terrain_generator,
+    knee_level: int,
+    knee_value: float,
+    per_terrain_knee_value: dict[str, float] | None = None,
+) -> None:
+    """Reshape each sub-terrain difficulty formula into a two-slope "knee".
+
+    The sub-terrain size formulas (``gap_size``, ``hurdle_height_range``,
+    ``step_height``, ``incline_height`` ...) are strings ``eval``-ed with
+    ``{"difficulty": d}`` where ``d = terrain_level / (num_rows - 1)`` is the
+    curriculum level mapped to [0, 1]. They are all linear in ``difficulty``.
+
+    Every ``difficulty`` token is replaced by a piecewise-linear remap
+    ``g(difficulty)`` (see ``_remap_token_knee``). Each sub-terrain uses
+    ``knee_value`` by default, but ``per_terrain_knee_value`` can override the
+    knee for specific sub-terrains by name (e.g. give the hard sloped-stone
+    ``parkour`` terrain a gentler ramp than gaps / hurdles / steps).
+
+    Anchor points ``g(0)=0`` and ``g(1)=1`` are preserved for every
+    sub-terrain, so both the flat floor at level 0 and the peak obstacle at
+    the top level are identical to the original linear curve regardless of
+    the knee value. The generator is deep-copied by the caller; this mutates
+    in place.
+    """
+    import re
+
+    gen = terrain_generator
+    if gen is None or gen.sub_terrains is None:
+        return
+    num_rows = gen.num_rows
+    per_terrain_knee_value = per_terrain_knee_value or {}
+    token = re.compile(r"\bdifficulty\b")
+    for name, sub in gen.sub_terrains.items():
+        kv = per_terrain_knee_value.get(name, knee_value)
+        repl = _remap_token_knee(knee_level, kv, num_rows)
+        for key, value in list(vars(sub).items()):
+            if isinstance(value, str) and "difficulty" in value:
+                setattr(sub, key, token.sub(repl, value))
+
+
+@configclass
+class UnitreeGo2PIEFullParkourStage2WarmFrontFastEnvCfg(
+    UnitreeGo2PIEFullParkourStage2WarmEnvCfg
+):
+    """Stage 2 warm-up with a "fast early, slow late" difficulty ramp.
+
+    Identical to ``UnitreeGo2PIEFullParkourStage2WarmEnvCfg`` in every
+    respect - same obstacle mix, same peak obstacle sizes at
+    ``difficulty=1``, same rewards / terminations / commands - except the
+    per sub-terrain difficulty formulas are remapped with a two-slope knee
+    (see ``_reshape_difficulty_curve_knee``).
+
+    Motivation
+    ----------
+    A walker warm-started from ``easy_v5/model_19000`` already cleared the
+    obstacle mix up to roughly terrain level 4 before the *linear* Stage2Warm
+    ramp got too hard in the mid range (gap doubling to 0.70 m, step to
+    0.45 m) and the run diverged (terrain_levels peaked ~5 then fell to ~1.6).
+
+    Since the early levels are already mastered, there is no need to dwell on
+    them. This cfg ramps obstacles *fast* up to the knee at level
+    ``knee_level`` (default 4 - where the previous run got to), then ramps
+    *slowly* above it so the policy has room to consolidate on the genuinely
+    new, hard terrain instead of being thrown straight into peak-size
+    obstacles.
+
+    Per-terrain override
+    --------------------
+    The sloped-stone ``parkour`` sub-terrain (left/right alternating tilted
+    stones - the hardest terrain in the mix) is the exception: ramping it
+    *fast* early hurt its success rate. It gets its own gentler knee via
+    ``slope_knee_value`` (default 0.30, which is below ``d_knee`` => the
+    slope ramps slowly early and only steepens in the upper levels). All
+    other terrains keep the fast-early ``knee_value``.
+
+    Peak (difficulty=1) sizes are unchanged for every sub-terrain: gap
+    0.70 m, hurdle 0.15-0.40 m, step 0.45 m, incline 0.25 m. Only the path
+    to get there changes shape.
+
+    Tunables
+    --------
+    - ``knee_level``: terrain level where every ramp switches slope
+      (default 4 => ``d_knee = 4/9 ~= 0.44``).
+    - ``knee_value``: remapped difficulty reached at the knee for the
+      gap/hurdle/step terrains (default 0.6). ``> d_knee`` = fast early.
+    - ``slope_knee_value``: knee for the sloped-stone ``parkour`` terrain
+      only (default 0.30). ``< d_knee`` = slow early, so the slope is not
+      pushed hard until the upper levels.
+    """
+
+    knee_level: int = 4
+    knee_value: float = 0.6
+    slope_knee_value: float = 0.30
+
+    def __post_init__(self):
+        super().__post_init__()
+        import copy
+
+        gen = self.scene.terrain.terrain_generator
+        if gen is None:
+            return
+        # Deep-copy so we never mutate the shared module-level
+        # FULL_PARKOUR_WITH_GAP_TERRAINS_CFG singleton that the parent
+        # assigned (other env cfgs reuse the same object).
+        gen = copy.deepcopy(gen)
+        _reshape_difficulty_curve_knee(
+            gen,
+            self.knee_level,
+            self.knee_value,
+            per_terrain_knee_value={"parkour": self.slope_knee_value},
+        )
+        self.scene.terrain.terrain_generator = gen
+
+
 @configclass
 class UnitreeGo2PIEFullParkourEasyEnvCfg(UnitreeGo2PIEFullParkourStage2WarmEnvCfg):
     """Easy variant of Stage 2 warm-up: every obstacle starts at 5 cm.
