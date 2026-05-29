@@ -67,6 +67,18 @@ FEATURE_DIMS = {
 FOOT_NAMES = ("FL", "FR", "RL", "RR")
 
 
+def _refresh_feature_dims(estimator) -> None:
+    """Update FEATURE_DIMS from the actual estimator so the audit works for any
+    z_m_dim / latent_dim (e.g. the high-capacity variant uses z_m_dim=64)."""
+    z_m = int(getattr(estimator, "z_m_dim", FEATURE_DIMS["z_m"]))
+    latent = int(getattr(estimator, "latent_dim", FEATURE_DIMS["z_mu"]))
+    foot = int(getattr(estimator, "foot_height_dim", FEATURE_DIMS["h_f_hat"]))
+    FEATURE_DIMS["z_m"] = z_m
+    FEATURE_DIMS["z"] = latent
+    FEATURE_DIMS["z_mu"] = latent
+    FEATURE_DIMS["h_f_hat"] = foot
+
+
 @dataclass
 class EstimatorStats:
     samples: int = 0
@@ -159,6 +171,7 @@ def main() -> None:
     runner.load(args_cli.checkpoint, load_optimizer=False)
     runner.alg.policy.eval()
     runner.alg.estimator.eval()
+    _refresh_feature_dims(runner.alg.estimator)
 
     if not getattr(runner.alg, "use_pie_actor_features", False):
         raise RuntimeError("This diagnostic expects use_pie_actor_features=True")

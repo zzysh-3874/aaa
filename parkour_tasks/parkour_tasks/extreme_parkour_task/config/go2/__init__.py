@@ -313,11 +313,25 @@ gym.register(
     },
 )
 
-# Terrain-adaptive variant: same FrontFast curriculum env, but the estimator
-# uses terrain-adaptive loss weighting (terrain_adaptive=2.0) so height / foot-
-# clearance estimation gradient is concentrated on rough sub-terrains (step /
-# slope / gap) where audits showed 5-12x worse error than flat ground. Loss-only
-# change (network shapes unchanged) so it can resume from a FrontFast checkpoint.
+# Strategy B: high-capacity perception variant, from scratch. Same FrontFast
+# curriculum env, but the runner uses the high-capacity estimator (z_m=64,
+# depth feature map 8x12, wider height decoder, terrain_adaptive=2.0, h_f
+# weight 2.0) and a matching num_actor_obs=150 actor. Aimed at the audited
+# root cause: 5-12x worse height/h_f error on rough terrain. NOT checkpoint
+# compatible with prior PIE runs (train from scratch).
+gym.register(
+    id="Isaac-PIE-FullParkour-HighCap-Unitree-Go2-v0",
+    entry_point="parkour_isaaclab.envs:ParkourManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.parkour_pie_cfg:UnitreeGo2PIEFullParkourStage2WarmFrontFastEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_pie_ppo_cfg:UnitreeGo2PIEFullParkourHighCapPPORunnerCfg",
+    },
+)
+
+# Terrain-adaptive (loss-only) variant: same FrontFast env, estimator uses
+# terrain_adaptive=2.0 but unchanged network shapes, so it can resume from a
+# FrontFast checkpoint (no architecture change).
 gym.register(
     id="Isaac-PIE-FullParkour-Stage2WarmFrontFastTA-Unitree-Go2-v0",
     entry_point="parkour_isaaclab.envs:ParkourManagerBasedRLEnv",

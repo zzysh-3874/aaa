@@ -316,6 +316,73 @@ class UnitreeGo2PIEFullStage2WarmTerrainAdaptivePPORunnerCfg(UnitreeGo2PIEFullSt
     estimator = ParkourRslRlPIETerrainAdaptiveEstimatorCfg()
 
 
+# ---------------------------------------------------------------------------
+# High-capacity perception variant (from-scratch experiment "Strategy B").
+#
+# Audits showed PIE height/foot-clearance error is 5-12x worse on rough
+# sub-terrains (step/slope/gap) than on flat ground. Strategy B combines
+# four changes aimed squarely at perception accuracy, all of which preserve
+# the sim2real interface (depth input 2x58x87, proprio 47, action 12):
+#   (1) terrain_adaptive=2.0   - focus loss gradient on rough terrain
+#   (2) z_m_dim 32 -> 64 + height_decoder [128] -> [256,128]
+#                              - more capacity for the 132-dim height map
+#   (3) depth_feature_map 6x9 -> 8x12 (54 -> 96 visual tokens)
+#                              - preserve terrain edge detail through the CNN
+#   (6) h_f loss weight 1.0 -> 2.0  - push foot-clearance accuracy
+#
+# Because z_m grows, the actor input grows: 47 + 64 (z_m) + 32 (z_mu) +
+# 3 (v) + 4 (h_f) = 150 (was 118). The matching actor cfg sets
+# num_actor_obs=150. This is a from-scratch architecture (cannot resume old
+# checkpoints).
+# ---------------------------------------------------------------------------
+@configclass
+class ParkourRslRlPIEHighCapEstimatorCfg(ParkourRslRlPIEEstimatorCfg):
+    """High-capacity PIE estimator: bigger terrain latent + finer depth map."""
+
+    z_m_dim: int = 64
+    depth_feature_map_shape: tuple[int, int] = (8, 12)
+    height_decoder_hidden_dims: tuple[int, ...] = (256, 128)
+    loss_weights: dict[str, float] = {
+        "v": 1.0,
+        "h_f": 2.0,
+        "height": 1.0,
+        "next_proprio": 1.0,
+        "kl": 1.0,
+        "terrain_adaptive": 2.0,
+    }
+
+
+@configclass
+class ParkourRslRlPIEHighCapActorCriticCfg(ParkourRslRlPIEFullStage2WarmActorCriticCfg):
+    """Actor for the high-capacity estimator: z_m=64 widens actor input to 150.
+
+    actor input = proprio(47) + z_m(64) + z_mu(32) + v_hat(3) + h_f(4) = 150.
+    Keeps Stage-2 warm action_limit=0.8 and Teacher-level init_noise_std=1.0
+    for from-scratch exploration.
+    """
+
+    num_actor_obs: int = 150
+
+
+@configclass
+class UnitreeGo2PIEFullParkourHighCapPPORunnerCfg(UnitreeGo2PIEFullStage2WarmPPORunnerCfg):
+    """From-scratch high-capacity perception runner (Strategy B).
+
+    Pairs the high-capacity estimator (z_m=64, depth 8x12, wider height
+    decoder, terrain_adaptive=2.0, h_f weight 2.0) with the matching
+    num_actor_obs=150 actor. Trained from random init on the FrontFast
+    curriculum. NOT checkpoint-compatible with prior PIE runs.
+
+    save_interval=250 so a short 500-iteration smoke run produces
+    model_250 / model_500 checkpoints to inspect early before committing to a
+    long run.
+    """
+
+    save_interval = 250
+    estimator = ParkourRslRlPIEHighCapEstimatorCfg()
+    policy = ParkourRslRlPIEHighCapActorCriticCfg()
+
+
 @configclass
 class UnitreeGo2PIEBridgePPORunnerCfg(UnitreeGo2PIEParkourPPORunnerCfg):
     """Bridge runner that relaxes Gentle constraints before full PIE training."""

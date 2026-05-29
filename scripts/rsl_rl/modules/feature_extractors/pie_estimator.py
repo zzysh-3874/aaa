@@ -87,6 +87,7 @@ class PIEEstimator(nn.Module):
         activation: str = "elu",
         transformer_heads: int = 4,
         sample_latent_in_training: bool = False,
+        height_decoder_hidden_dims: list[int] | tuple[int, ...] | None = None,
         **kwargs,
     ):
         super().__init__()
@@ -137,7 +138,9 @@ class PIEEstimator(nn.Module):
         self.z_mu_head = nn.Linear(self.fused_dim, latent_dim)
         self.z_logvar_head = nn.Linear(self.fused_dim, latent_dim)
 
-        self.height_decoder = _mlp(z_m_dim, [128], height_dim, activation)
+        if height_decoder_hidden_dims is None:
+            height_decoder_hidden_dims = [128]
+        self.height_decoder = _mlp(z_m_dim, list(height_decoder_hidden_dims), height_dim, activation)
         # Remove z_m from next_proprio decoder inputs so the VAE latent z must carry
         # the residual information required to reconstruct next proprioception.
         # Keeping z_m in the decoder gave the model a shortcut that caused posterior
