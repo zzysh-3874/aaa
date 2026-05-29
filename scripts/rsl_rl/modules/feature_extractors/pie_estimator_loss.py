@@ -13,6 +13,13 @@ DEFAULT_PIE_ESTIMATOR_LOSS_WEIGHTS = {
     "height": 1.0,
     "next_proprio": 1.0,
     "kl": 0.0,
+    # Terrain-adaptive weighting strength for the height / foot-clearance
+    # losses. 0.0 disables it (uniform MSE, original behaviour). When > 0,
+    # per-sample loss weights are derived from the spatial roughness of the
+    # ground-truth height scan so that complex terrain (steps / slopes / gaps)
+    # contributes more gradient than flat ground. See
+    # ``_terrain_difficulty_weight``. A value of 1.0 is a moderate emphasis.
+    "terrain_adaptive": 0.0,
 }
 
 # PIE proprioception is [ang_vel(3), gravity(3), command(3), joint_pos(12),
@@ -76,6 +83,45 @@ def build_pie_transition_targets(
     return transition_targets
 
 
+def _terrain_difficulty_weight(height_target: torch.Tensor, strength: float) -> torch.Tensor:
+    """Per-sample loss weight derived from height-scan spatial roughness.
+
+    Flat ground has a near-constant height scan (low spatial std); steps,
+    slopes and gaps have a high spatial std. We map the per-sample spatial std
+    of the ground-truth height scan to a multiplicative loss weight:
+
+        w_i = 1 + strength * (std_i / mean_std)
+
+    then normalise so the batch-mean weight is 1.0. Normalisation keeps the
+    overall loss magnitude unchanged (so the existing learning rate / loss
+    balance still holds) while redistributing gradient toward rough terrain.
+
+    Args:
+        height_target: (B, height_dim) ground-truth height scan.
+        strength: emphasis factor (>= 0). 0 returns uniform weights.
+
+    Returns:
+        (B, 1) per-sample weights with batch mean ~= 1.
+    """
+    if strength <= 0.0:
+        return torch.ones(height_target.shape[0], 1, device=height_target.device, dtype=height_target.dtype)
+    # Spatial std across the height-scan dimension, per sample.
+    std_i = height_target.std(dim=-1, keepdim=True)  # (B, 1)
+    mean_std = std_i.mean().clamp_min(1e-6)
+    raw = 1.0 + strength * (std_i / mean_std)
+    # Normalise so batch-mean weight == 1 (preserve overall loss scale).
+    return raw / raw.mean().clamp_min(1e-6)
+
+
+def _weighted_mse(prediction: torch.Tensor, target: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+    """MSE with per-sample (B,1) weights; reduces to plain mean when weight==1."""
+    squared_error = (prediction - target).pow(2)
+    # weight is (B, 1); broadcast over feature dim. Because weight is
+    # batch-mean-normalised to 1, this matches F.mse_loss when weights are
+    # uniform.
+    return (squared_error * weight).mean()
+
+
 def compute_pie_estimator_loss(
     predictions: Mapping[str, torch.Tensor],
     targets: Mapping[str, torch.Tensor],
@@ -92,9 +138,15 @@ def compute_pie_estimator_loss(
     next_proprio_target = _target_like(targets["next_proprioception"], predictions["next_proprio_hat"])
     next_proprio_mask = targets.get("next_proprioception_mask")
 
+    # Terrain-adaptive per-sample weighting for the perception losses (height
+    # scan + foot clearance). Derived from the ground-truth height scan, so no
+    # extra terrain metadata is needed. Disabled (uniform) when strength == 0.
+    terrain_strength = float(loss_weights.get("terrain_adaptive", 0.0))
+    terrain_weight = _terrain_difficulty_weight(height_target, terrain_strength)
+
     loss_v = F.mse_loss(predictions["v_hat"], v_target)
-    loss_hf = F.mse_loss(predictions["h_f_hat"], h_f_target)
-    loss_height = F.mse_loss(predictions["height_hat"], height_target)
+    loss_hf = _weighted_mse(predictions["h_f_hat"], h_f_target, terrain_weight)
+    loss_height = _weighted_mse(predictions["height_hat"], height_target, terrain_weight)
     loss_next_proprio = _masked_mse(
         predictions["next_proprio_hat"][..., :NEXT_PROPRIO_STATE_DIM],
         next_proprio_target[..., :NEXT_PROPRIO_STATE_DIM],

@@ -108,6 +108,11 @@ class ParkourRslRlPIEEstimatorCfg:
         "height": 1.0,
         "next_proprio": 1.0,
         "kl": 1.0,
+        # Terrain-adaptive emphasis for height/foot-clearance losses. 0.0 keeps
+        # the original uniform MSE. Raise (e.g. 2.0) to focus estimator
+        # gradient on rough terrain (steps/slopes/gaps), where audits showed
+        # height/h_f error is 5-12x worse than on flat ground.
+        "terrain_adaptive": 0.0,
     }
 
 
@@ -271,6 +276,44 @@ class UnitreeGo2PIEFullStage2WarmPPORunnerCfg(UnitreeGo2PIEFullParkourPPORunnerC
     save_interval = 1000
     clip_actions = 0.8
     policy = ParkourRslRlPIEFullStage2WarmActorCriticCfg()
+
+
+@configclass
+class ParkourRslRlPIETerrainAdaptiveEstimatorCfg(ParkourRslRlPIEEstimatorCfg):
+    """Estimator cfg that turns on terrain-adaptive height/h_f loss weighting.
+
+    Audits showed the estimator's height and foot-clearance error on rough
+    sub-terrains (step / slope / gap) is 5-12x worse than on flat ground,
+    because flat samples dominate the uniform-MSE loss. Setting
+    ``terrain_adaptive=2.0`` reweights each sample by its height-scan spatial
+    roughness (batch-mean-normalised to 1) so the estimator is pushed to
+    estimate accurately exactly where parkour traversal needs it. This is a
+    loss-only change: the network architecture is unchanged, so a checkpoint
+    can resume into this runner.
+    """
+
+    loss_weights: dict[str, float] = {
+        "v": 1.0,
+        "h_f": 1.0,
+        "height": 1.0,
+        "next_proprio": 1.0,
+        "kl": 1.0,
+        "terrain_adaptive": 2.0,
+    }
+
+
+@configclass
+class UnitreeGo2PIEFullStage2WarmTerrainAdaptivePPORunnerCfg(UnitreeGo2PIEFullStage2WarmPPORunnerCfg):
+    """Stage-2 warm-up runner with terrain-adaptive estimator loss weighting.
+
+    Identical to ``UnitreeGo2PIEFullStage2WarmPPORunnerCfg`` (same actor,
+    clip_actions, save_interval) except the estimator uses
+    ``terrain_adaptive=2.0`` to emphasise rough-terrain perception accuracy.
+    Network shapes are unchanged, so this can resume from an existing
+    FrontFast / Stage2Warm checkpoint.
+    """
+
+    estimator = ParkourRslRlPIETerrainAdaptiveEstimatorCfg()
 
 
 @configclass
