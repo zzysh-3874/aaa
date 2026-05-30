@@ -31,6 +31,7 @@ from .parkour_mdp_cfg import (
     GapOnlyRewardsCfg,
     TeacherRewardsCfg,
     FlatStageOneRewardsCfg,
+    FlatStageOneWarmupRewardsCfg,
     TerminationsCfg,
 )
 from .parkour_student_cfg import ParkourStudentSceneCfg
@@ -902,6 +903,21 @@ class UnitreeGo2PIEFlatParkourEnvCfg(UnitreeGo2PIEFullParkourEnvCfg):
         self.terminations.total_terminates.params["max_roll"] = 0.7
         self.terminations.total_terminates.params["max_pitch"] = 0.7
         self.terminations.total_terminates.params["minimum_height"] = 0.22
+
+
+@configclass
+class UnitreeGo2PIEFlatParkourWarmupEnvCfg(UnitreeGo2PIEFlatParkourEnvCfg):
+    """Flat walking warmup env with a stronger orientation penalty.
+
+    Identical to ``UnitreeGo2PIEFlatParkourEnvCfg`` (pure flat ground, no
+    domain randomisation, tight orientation termination) except the reward
+    set strengthens ``reward_orientation`` to -2.0 (vs the obstacle-relaxed
+    -0.5). Used for the HighCap flat warmup so the from-scratch policy learns
+    an upright posture before exploration noise collapses, instead of settling
+    into a rear-low / forward-pitched gait.
+    """
+
+    rewards: FlatStageOneWarmupRewardsCfg = FlatStageOneWarmupRewardsCfg()
 
 
 @configclass
