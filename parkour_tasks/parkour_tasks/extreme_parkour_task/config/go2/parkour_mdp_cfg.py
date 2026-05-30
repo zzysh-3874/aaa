@@ -562,24 +562,35 @@ class FlatStageOneRewardsCfg(TeacherRewardsCfg):
 
 @configclass
 class FlatStageOneWarmupRewardsCfg(FlatStageOneRewardsCfg):
-    """Flat walking warmup reward: same as FlatStageOneRewardsCfg but with a
-    stronger orientation penalty.
+    """Flat walking warmup reward: balanced orientation + forward-drive.
 
-    FlatStageOneRewardsCfg relaxes ``reward_orientation`` to -0.5 so the policy
-    can pitch forward to clear obstacles. On pure flat ground there are no
-    obstacles, and that relaxation let the from-scratch HighCap policy settle
-    into a rear-low / forward-pitched posture (body tilts up, velocity has an
-    upward component) before exploration noise collapsed (~0.05 by iter 1300),
-    after which it could not recover. On flat ground there is never a reason to
-    pitch, so we use -2.0 (stronger than Teacher's -1.0) to make "stay level" a
-    dominant signal from the very start of the walking bootstrap, before the
-    exploration noise decays. Used only for the flat warmup stage; the obstacle
-    stages keep the relaxed -0.5 from FlatStageOneRewardsCfg.
+    Iteration history on the from-scratch HighCap flat warmup:
+    - orientation -0.5 (obstacle-relaxed): policy settled into a rear-low /
+      forward-pitched posture (velocity tilts upward) before noise collapsed.
+    - orientation -2.0: posture became upright, but with tracking_goal_vel at
+      1.0 the policy found that standing perfectly still (zero orientation
+      penalty, no fall risk) out-rewarded walking (whose natural pitch wobble
+      costs -2.0), so it stopped moving.
+    - current (-1.0 orientation + tracking_goal_vel 1.5): orientation back to
+      Teacher's default so persistent pitch is still penalised but a brief
+      walking wobble is affordable, and the forward-drive reward is raised to
+      Teacher's 1.5 so moving forward clearly beats standing still.
+
+    Used only for the flat warmup stage; the obstacle stages keep the relaxed
+    -0.5 orientation and 1.0 tracking from FlatStageOneRewardsCfg.
     """
 
     reward_orientation = RewTerm(
         func=rewards.reward_orientation,
-        weight=-2.0,
+        weight=-1.0,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "parkour_name": "base_parkour",
+        },
+    )
+    reward_tracking_goal_vel = RewTerm(
+        func=rewards.reward_tracking_goal_vel,
+        weight=1.5,
         params={
             "asset_cfg": SceneEntityCfg("robot"),
             "parkour_name": "base_parkour",
