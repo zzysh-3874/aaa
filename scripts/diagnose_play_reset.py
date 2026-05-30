@@ -16,11 +16,13 @@ from isaaclab.app import AppLauncher
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _SCRIPT_DIR.parent
+sys.path = [path for path in sys.path if Path(path or ".").resolve() != _SCRIPT_DIR]
 sys.path.insert(0, str(_REPO_ROOT))
 
 _CLI = _SCRIPT_DIR / "rsl_rl" / "cli_args.py"
-_spec = importlib.util.spec_from_file_location("cli_args", _CLI)
+_spec = importlib.util.spec_from_file_location("parkour_rsl_cli_args", _CLI)
 cli_args = importlib.util.module_from_spec(_spec)
+assert _spec.loader is not None
 _spec.loader.exec_module(cli_args)
 
 parser = argparse.ArgumentParser()
