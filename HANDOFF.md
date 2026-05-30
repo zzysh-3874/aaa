@@ -1,5 +1,88 @@
 # HANDOFF
 
+## 2026-05-30 · HighCap 感知增强 + 两阶段(平地warmup→全地形) + 一路诊断
+
+### 起因
+卡在 terrain_level 5.6 上不去。审计 PIE estimator 发现根因不是 z latent、不是难度曲线，
+而是 **estimator 在复杂地形(台阶/斜坡/沟)上地形感知误差是平地的 5-12 倍**:
+- 分地形审计(scripts/audit 新增 PER-TERRAIN h_f/height RMSE):
+  flat: h_f 0.05 / height 0.015；step: h_f 0.09；slope(parkour): h_f 0.08 / height 0.175(17.5cm!)
+- `zero_h_f_hat≈0.05`(actor 几乎不用 h_f)、`depth_shuffle→h_f≈0.06`(h_f 不看深度,走 proprio 捷径)
+- 对照 PIE 论文(arXiv 2408.13740)消融:去掉 h_f → step 崩到 1.67;去掉 height(z_m) → step 3.09。
+  即 h_f/height(z_m)才是 step/slope 命门,z(隐式 latent)贡献最小(9.9→9.51)。论文未公布维度超参,
+  现有 z_m=32/latent=32/CNN 6x9/KL=1.0 都是本仓自定的。
+
+### 难度曲线(commit 45766b7)
+- 新增"前快后慢"曲线 `_reshape_difficulty_curve_knee`(拐点 level 4,knee_value 0.6):
+  已会的简单段(0-4)快速冲过,新难段(4-9)放缓,**终点 difficulty=1 尺寸不变**。
+- 斜坡(parkour 子地形)单独用更缓曲线(slope_knee_value=0.30),因为斜坡固有最难。
+- 任务 `Isaac-PIE-FullParkour-Stage2WarmFrontFast-Unitree-Go2-v0`(env FrontFast)。
+- 验证:线性 Stage2Warm 卡 5 后发散;FrontFast 稳到 5.6 不发散(但仍慢,~0.15/千轮)。
+
+### HighCap 高容量感知(Strategy B, commit 3568cfd/c53304d)
+直接打击"复杂地形估不准",**全部保持 sim2real 接口不变(depth 2x58x87/proprio 47/action 12)**:
+- terrain_adaptive 加权 loss(pie_estimator_loss.py):按 height_scan 空间方差给 h_f/height loss 加权,
+  batch 均值归一(不改 loss 量级),平地权重低、台阶/斜坡/沟权重高。默认 0=原行为(向后兼容)。
+- HighCap estimator: z_m 32→64、CNN 6x9→8x12(54→96 token)、height_decoder [128]→[256,128]、
+  h_f 权重 2.0、terrain_adaptive 2.0。actor 输入 118→**150**(47+64+32+3+4)。从头训(不兼容旧 ckpt)。
+- 任务 `Isaac-PIE-FullParkour-HighCap-Unitree-Go2-v0`。
+
+### 关键教训:HighCap 从头训全地形学不会走路
+- HighCap + FrontFast 从头训:noise 1769 轮崩到 0.03,episode_length 剧烈波动,站不稳。
+- 印证项目历史:PIE 从头训全障碍地形难收敛,必须先平地 warmup。
+
+### 两阶段方案
+**Stage 0 平地 warmup**(commit dca2cf1/0eabdb1/95c9d83):
+- 任务 `Isaac-PIE-FullParkour-HighCap-FlatWarmup`(env `UnitreeGo2PIEFlatParkourWarmupEnvCfg` 纯平地)。
+- **关键:平地阶段 h_f/height loss 关闭(权重 0)**。平地上这俩 target 用 proprio 就能拟合,
+  训它们会教成"不看深度"的捷径(正是审计发现的病)。关掉让 head 留白,到障碍阶段再开。
+  v_hat/next_proprio loss 保留。
+- reward 三次迭代调平衡(FlatStageOneWarmupRewardsCfg):
+  - orientation -0.5(松)→ 屁股低前倾
+  - orientation -2.0(紧)→ 站着不动(走路扣分>前进奖励)
+  - **orientation -1.0 + tracking_goal_vel 1.5(平衡)** → 正常走。how_far 6.5m、episode_length ~800。
+
+**Stage 0 的关键诊断坑(重要)**:
+- model_1500 play"一动就 reset",但训练 episode_length 800。逐项排查:
+  - md5 一致(没存错节点)、agent.yaml 维度逐项一致(不是 HighCap 维度不匹配)、
+    audit 推理路径全 0(GRU hidden/actor obs 拼接都对)、加回 0.03 noise 没差(不是 noise-stabilized)。
+  - 最终用 `scripts/diagnose_play_reset.py`(注意:IsaacLab 在 env.step **内部** reset 终止的 env,
+    必须在 step **前**快照 root state 才能读到触发瞬间的值)定位:
+    **reset 瞬间 z=0.22、roll/pitch≈0 → 重心持续下沉到 minimum_height=0.22 触发终止,不是摔。**
+  - 根因:`reward_base_height_below_target` 权重 -1.0 太弱(z=0.22 时仅 -0.08/步,远小于 tracking +1.5),
+    策略学成低重心姿态。**但 model_2500 自愈**(reset 从 35 步推到 97+ 步,只是没训够),play 走得还行。
+    所以未改 base_height,继续训到 3500。
+
+**Stage 2 全地形**(commit 6cc05f7) — 当前正在跑:
+- 任务 `Isaac-PIE-FullParkour-HighCap-Stage2-Unitree-Go2-v0`
+  (env `UnitreeGo2PIEFullParkourFrontFastStage2EnvCfg` = FrontFast + `FlatStageOneStage2RewardsCfg`)。
+- 从平地 model_3500 `--resume --reset_optimizer_on_resume`(Adam 重置,适应新开的 h_f/height loss)。
+- reward: tracking_goal_vel 1.5(承接平地);orientation -0.5 但 reward 函数按地形自动开关
+  (非 parkour_flat 子地形归零 → 过障碍不受姿态约束,平地段才约束)。
+- h_f/height/terrain_adaptive 全开(切到障碍才开始学真正的地形感知)。
+- 域随机化仍关(第三阶段 sim2real 再开,对齐论文 Table II:电机强度/PD/延迟/相机噪声等,目前缺)。
+- run `5gpu_highcap_stage2_from_flat3500`,tmux `stage2`,日志 `/tmp/train_stage2.log`。
+
+### 切换后要盯
+1. estimator h_f/height loss:刚开会高然后降(终于学地形)
+2. episode_length:别一直 <100(适应不过来);先掉后回升属正常
+3. terrain_levels:从 0 爬(resume 不继承等级——`terrain_importer.py:346` 每次 randint 重置)
+4. ~2000-3000 轮跑分地形审计,看台阶/斜坡 h_f/height RMSE 是否比之前降(验证整套方案)
+
+### 工具改动
+- `scripts/audit_pie_estimator_pipeline.py`:修 headless 键盘崩溃(parkour_viewprot_camera_contoller.py
+  加守卫)、修 45→动态 proprio 维(支持 47)、FEATURE_DIMS 从 estimator 动态读(支持 z_m=64)、
+  新增分地形 h_f/height RMSE。审计务必带 `--headless`。
+- `scripts/diagnose_play_reset.py`:确定性 rollout,step 前快照 state,报 reset 触发的 cutoff。
+- `scripts/rsl_rl/play.py`:加 `--inference_noise_std`(play 时注入噪声,测 noise-stabilized)。
+- 本地 play 用 `--num_envs 4`(16 会把本地 RTX 5060Ti 卡死)。
+- 服务器 SSH 频繁开会触发并发上限被拒(`Connection closed by ... port 22`),重连前等 10-20s;
+  内网 10.12.13.41 和外网 frpc 47.99.88.223:6022 都可用,frpc 较稳。
+- TensorBoard 在服务器跑(logdir /mnt/data1/wgy/projects/aaa/logs/rsl_rl, port 6007),
+  本地建隧道 `ssh -N -L 6007:localhost:6007 zjut-4090x8-wgy-frpc` 后看 localhost:6007。
+
+---
+
 ## 2026-05-15 → 17 · GapOnly + FlatWalkParkourCmd 系列实验
 
 ### 任务目标
