@@ -21,12 +21,18 @@ class PIEActorInferenceWrapper:
         algorithm: "PPOWithExtractor",
         normalizer: nn.Module | None = None,
         device: torch.device | str | None = None,
+        inference_noise_std: float | None = None,
     ):
         if not algorithm.use_pie_actor_features:
             raise ValueError("PIEActorInferenceWrapper requires use_pie_actor_features=True")
         self.algorithm = algorithm
         self.normalizer = normalizer if normalizer is not None else nn.Identity()
         self.device = device
+        # When set, inference adds Gaussian noise of this std to the actor mean
+        # (matching the exploration noise present during training). Used to test
+        # whether a policy is "noise-stabilised" - i.e. relies on training-time
+        # action noise to maintain balance and collapses under deterministic play.
+        self.inference_noise_std = inference_noise_std
         self.algorithm.reset_pie_actor_hidden()
 
     def __call__(
@@ -44,7 +50,10 @@ class PIEActorInferenceWrapper:
             policy_obs = policy_obs.to(self.device)
         policy_obs = self.normalizer(policy_obs)
         actor_obs = self.algorithm.build_pie_actor_observations(policy_obs, obs_dict)
-        return self.algorithm.policy.act_inference(actor_obs, hist_encoding=hist_encoding, **kwargs)
+        mean = self.algorithm.policy.act_inference(actor_obs, hist_encoding=hist_encoding, **kwargs)
+        if self.inference_noise_std is not None and self.inference_noise_std > 0.0:
+            mean = mean + self.inference_noise_std * torch.randn_like(mean)
+        return mean
 
     def reset(self, dones: torch.Tensor | None = None) -> None:
         self.algorithm.reset_pie_actor_hidden(dones)

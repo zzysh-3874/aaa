@@ -41,6 +41,13 @@ parser.add_argument(
     default=False,
     help="Lock the Isaac Sim viewport camera to follow env 0's robot.",
 )
+parser.add_argument(
+    "--inference_noise_std",
+    type=float,
+    default=None,
+    help="If set, add Gaussian action noise of this std during play (matches training exploration). "
+    "Use to test whether a policy is noise-stabilised (collapses under deterministic play).",
+)
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
 # append AppLauncher cli args
@@ -191,7 +198,7 @@ def main():
 
     else:
         if use_pie_inference:
-            policy = ppo_runner.get_pie_inference_policy(device=env.unwrapped.device)
+            policy = ppo_runner.get_pie_inference_policy(device=env.unwrapped.device, inference_noise_std=args_cli.inference_noise_std)
             print("[INFO] Using PIE actor inference wrapper with obs_dict depth/proprioception features.")
         else:
             policy = ppo_runner.get_inference_policy(device=env.unwrapped.device)

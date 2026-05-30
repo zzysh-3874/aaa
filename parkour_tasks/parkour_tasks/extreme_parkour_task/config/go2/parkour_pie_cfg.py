@@ -32,6 +32,7 @@ from .parkour_mdp_cfg import (
     TeacherRewardsCfg,
     FlatStageOneRewardsCfg,
     FlatStageOneWarmupRewardsCfg,
+    FlatStageOneStage2RewardsCfg,
     TerminationsCfg,
 )
 from .parkour_student_cfg import ParkourStudentSceneCfg
@@ -761,6 +762,24 @@ class UnitreeGo2PIEFullParkourStage2WarmFrontFastEnvCfg(
             per_terrain_knee_value={"parkour": self.slope_knee_value},
         )
         self.scene.terrain.terrain_generator = gen
+
+
+@configclass
+class UnitreeGo2PIEFullParkourFrontFastStage2EnvCfg(
+    UnitreeGo2PIEFullParkourStage2WarmFrontFastEnvCfg
+):
+    """Stage-2 obstacle env for resuming from the HighCap flat warmup.
+
+    Same FrontFast curriculum (fast-early/slow-late difficulty, gentle slope
+    knee) as the parent, but uses ``FlatStageOneStage2RewardsCfg`` which raises
+    reward_tracking_goal_vel to 1.5 (carried over from the flat warmup) so the
+    policy keeps a strong forward drive through the obstacle course. Orientation
+    stays at -0.5 and is auto-zeroed on non-flat sub-terrains by the reward
+    function, so obstacle traversal is unconstrained while flat segments still
+    discourage a low/pitched posture.
+    """
+
+    rewards: FlatStageOneStage2RewardsCfg = FlatStageOneStage2RewardsCfg()
 
 
 @configclass

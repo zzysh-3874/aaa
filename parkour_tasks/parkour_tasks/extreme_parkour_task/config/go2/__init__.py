@@ -359,6 +359,22 @@ gym.register(
     },
 )
 
+# HighCap Stage 2: full obstacle terrain, resumed from the flat warmup. Same
+# HighCap network + FrontFast curriculum, but reward uses tracking_goal_vel=1.5
+# (carried from the flat warmup) and the estimator's h_f/height/terrain_adaptive
+# losses are ON (HighCap runner). Resume the flat-warmup checkpoint into this
+# task with --reset_optimizer_on_resume so Adam adapts to the newly-enabled
+# terrain losses.
+gym.register(
+    id="Isaac-PIE-FullParkour-HighCap-Stage2-Unitree-Go2-v0",
+    entry_point="parkour_isaaclab.envs:ParkourManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.parkour_pie_cfg:UnitreeGo2PIEFullParkourFrontFastStage2EnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_pie_ppo_cfg:UnitreeGo2PIEFullParkourHighCapPPORunnerCfg",
+    },
+)
+
 # Terrain-adaptive (loss-only) variant: same FrontFast env, estimator uses
 # terrain_adaptive=2.0 but unchanged network shapes, so it can resume from a
 # FrontFast checkpoint (no architecture change).

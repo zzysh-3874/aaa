@@ -70,22 +70,35 @@ def main():
     for step in range(args_cli.steps):
         with torch.no_grad():
             actions = policy(extras["observations"], hist_encoding=True)
+        # Capture pre-step state: IsaacLab resets terminated envs INSIDE env.step,
+        # so reading robot state after step shows the post-reset pose (z=0.40).
+        # We snapshot the state before stepping and report it for envs that end.
+        roll_b, pitch_b, _ = euler_xyz_from_quat(robot.data.root_state_w[:, 3:7])
+        z_b = robot.data.root_state_w[:, 2].clone()
+        roll_b = wrap_to_pi(roll_b).abs().clone()
+        pitch_b = wrap_to_pi(pitch_b).abs().clone()
+        pe = env.unwrapped.parkour_manager.get_term("base_parkour")
+        gidx_b = pe.cur_goal_idx.clone()
+        num_goals = env.unwrapped.scene.terrain.cfg.terrain_generator.num_goals
+        maxep = env.unwrapped.max_episode_length
         obs, _, dones, extras = env.step(actions)
         ep_len += 1
         done_idx = dones.nonzero(as_tuple=False).flatten()
         if done_idx.numel() > 0:
-            roll, pitch, _ = euler_xyz_from_quat(robot.data.root_state_w[:, 3:7])
-            z = robot.data.root_state_w[:, 2]
             for i in done_idx.tolist():
-                r = wrap_to_pi(roll[i]).abs().item()
-                p = wrap_to_pi(pitch[i]).abs().item()
-                zz = z[i].item()
+                r = roll_b[i].item()
+                p = pitch_b[i].item()
+                zz = z_b[i].item()
+                gi = int(gidx_b[i].item())
                 cause = []
                 if r > 0.7: cause.append(f"ROLL({r:.2f})")
                 if p > 0.7: cause.append(f"PITCH({p:.2f})")
                 if zz < 0.22: cause.append(f"HEIGHT({zz:.2f})")
-                if not cause: cause.append("goal/timeout/other")
-                print(f"  env{i} reset @step{int(ep_len[i])}: {' '.join(cause)} (roll={r:.2f} pitch={p:.2f} z={zz:.2f})")
+                if zz < -0.25: cause.append("FELL_OFF")
+                if gi >= num_goals: cause.append(f"REACH_GOAL(idx={gi}/{num_goals})")
+                if int(ep_len[i]) >= maxep: cause.append("TIMEOUT")
+                if not cause: cause.append(f"UNKNOWN(goal_idx={gi}/{num_goals})")
+                print(f"  env{i} reset @step{int(ep_len[i])}: {' '.join(cause)} (pre-step roll={r:.2f} pitch={p:.2f} z={zz:.2f})")
             ep_len[done_idx] = 0
         if step > 30 and (ep_len < 1).all():
             pass

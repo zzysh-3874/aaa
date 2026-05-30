@@ -598,6 +598,26 @@ class FlatStageOneWarmupRewardsCfg(FlatStageOneRewardsCfg):
     )
 
 @configclass
+class FlatStageOneStage2RewardsCfg(FlatStageOneRewardsCfg):
+    """Stage-2 (full obstacle terrain) reward for resuming from the flat warmup.
+
+    Same as FlatStageOneRewardsCfg (orientation -0.5, which the reward function
+    already zeroes on non-flat sub-terrains so obstacles are unconstrained),
+    but raises reward_tracking_goal_vel to 1.5 to keep a strong forward-drive
+    incentive carried over from the flat warmup, so the policy keeps moving
+    through the obstacle course instead of stalling.
+    """
+
+    reward_tracking_goal_vel = RewTerm(
+        func=rewards.reward_tracking_goal_vel,
+        weight=1.5,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "parkour_name": "base_parkour",
+        },
+    )
+
+@configclass
 class PIERewardsCfg:
     """PIE Table I reward terms.
 

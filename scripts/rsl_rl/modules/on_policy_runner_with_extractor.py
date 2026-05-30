@@ -641,7 +641,7 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
             policy = lambda x: self.alg.policy.act_inference(self.obs_normalizer(x))  # noqa: E731
         return policy
 
-    def get_pie_inference_policy(self, device=None):
+    def get_pie_inference_policy(self, device=None, inference_noise_std=None):
         self.eval_mode()  # switch to evaluation mode (dropout for example)
         if not getattr(self.alg, "use_pie_actor_features", False):
             raise RuntimeError("PIE inference policy requested, but use_pie_actor_features is disabled.")
@@ -653,7 +653,9 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
             normalizer.to(device)
         self.alg.estimator.eval()
         self.alg.reset_pie_actor_hidden()
-        return PIEActorInferenceWrapper(self.alg, normalizer=normalizer, device=device)
+        return PIEActorInferenceWrapper(
+            self.alg, normalizer=normalizer, device=device, inference_noise_std=inference_noise_std
+        )
 
     def get_inference_depth_policy(self, device=None):
         self.eval_mode()  # switch to evaluation mode (dropout for example)
