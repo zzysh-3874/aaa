@@ -327,6 +327,22 @@ gym.register(
     },
 )
 
+# HighCap Stage 0: pure flat walking warmup. FlatParkour env (single
+# parkour_flat sub-terrain, no roughness, no domain randomisation) + HighCap
+# flat-warmup runner (h_f/height losses OFF so flat ground does not teach a
+# depth-ignoring proprio shortcut). Train this from scratch first to get the
+# big HighCap network walking, then resume into HighCap on the obstacle mix
+# with h_f/height/terrain_adaptive turned on.
+gym.register(
+    id="Isaac-PIE-FullParkour-HighCap-FlatWarmup-Unitree-Go2-v0",
+    entry_point="parkour_isaaclab.envs:ParkourManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.parkour_pie_cfg:UnitreeGo2PIEFlatParkourEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_pie_ppo_cfg:UnitreeGo2PIEHighCapFlatWarmupPPORunnerCfg",
+    },
+)
+
 # Strategy B: high-capacity perception variant, from scratch. Same FrontFast
 # curriculum env, but the runner uses the high-capacity estimator (z_m=64,
 # depth feature map 8x12, wider height decoder, terrain_adaptive=2.0, h_f

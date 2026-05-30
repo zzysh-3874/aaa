@@ -383,6 +383,50 @@ class UnitreeGo2PIEFullParkourHighCapPPORunnerCfg(UnitreeGo2PIEFullStage2WarmPPO
     policy = ParkourRslRlPIEHighCapActorCriticCfg()
 
 
+# ---------------------------------------------------------------------------
+# Stage 0: flat-ground walking warmup for the high-capacity architecture.
+#
+# Audits + history show PIE from-scratch on the full obstacle mix fails to
+# learn to even stand/walk (episode_length collapses). So we bootstrap the
+# HighCap network on pure flat ground first. Crucially we DISABLE the h_f and
+# height estimator losses during this stage (weights 0): on flat ground the
+# foot-clearance / height targets are trivially predictable from proprio, so
+# training them here would teach the estimator a proprio shortcut that ignores
+# depth (exactly the failure the audit found: depth_shuffle->h_f ~ 0). By not
+# training them at all on flat ground, the heads start from a clean slate when
+# h_f/height (+terrain_adaptive) are turned back on in the obstacle stage.
+#
+# v_hat and next_proprio losses stay on (velocity tracking + delay robustness
+# are meaningful even on flat ground). Network shapes are identical to the
+# HighCap runner, so the obstacle stage can resume from this checkpoint.
+# ---------------------------------------------------------------------------
+@configclass
+class ParkourRslRlPIEHighCapFlatWarmupEstimatorCfg(ParkourRslRlPIEHighCapEstimatorCfg):
+    """HighCap estimator with terrain losses (h_f, height) disabled for the
+    flat walking warmup stage."""
+
+    loss_weights: dict[str, float] = {
+        "v": 1.0,
+        "h_f": 0.0,
+        "height": 0.0,
+        "next_proprio": 1.0,
+        "kl": 1.0,
+        "terrain_adaptive": 0.0,
+    }
+
+
+@configclass
+class UnitreeGo2PIEHighCapFlatWarmupPPORunnerCfg(UnitreeGo2PIEFullParkourHighCapPPORunnerCfg):
+    """Stage-0 flat walking warmup runner for the HighCap architecture.
+
+    Same network as the HighCap runner (so the obstacle stage can resume from
+    its checkpoint), but the estimator's h_f/height losses are off so flat
+    ground does not teach a depth-ignoring proprio shortcut.
+    """
+
+    estimator = ParkourRslRlPIEHighCapFlatWarmupEstimatorCfg()
+
+
 @configclass
 class UnitreeGo2PIEBridgePPORunnerCfg(UnitreeGo2PIEParkourPPORunnerCfg):
     """Bridge runner that relaxes Gentle constraints before full PIE training."""
