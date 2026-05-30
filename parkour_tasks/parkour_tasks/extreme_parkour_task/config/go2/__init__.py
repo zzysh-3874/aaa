@@ -294,6 +294,20 @@ gym.register(
     },
 )
 
+# HighCap architecture on the Easy terrain. Use this to PLAY a HighCap
+# checkpoint (z_m=64, num_actor_obs=150) on the gentler Easy curriculum, since
+# the regular Easy task uses the z_m=32 runner whose actor dims do not match a
+# HighCap checkpoint.
+gym.register(
+    id="Isaac-PIE-FullParkour-HighCap-Easy-Unitree-Go2-v0",
+    entry_point="parkour_isaaclab.envs:ParkourManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.parkour_pie_cfg:UnitreeGo2PIEFullParkourEasyEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_pie_ppo_cfg:UnitreeGo2PIEFullParkourHighCapPPORunnerCfg",
+    },
+)
+
 # Front-fast variant: identical to Stage2Warm (same peak obstacle sizes at
 # difficulty=1) but every sub-terrain difficulty formula is remapped with a
 # two-slope knee at terrain level 4 (knee_value=0.6): obstacles grow FAST
