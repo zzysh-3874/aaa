@@ -606,6 +606,14 @@ class FlatStageOneStage2RewardsCfg(FlatStageOneRewardsCfg):
     but raises reward_tracking_goal_vel to 1.5 to keep a strong forward-drive
     incentive carried over from the flat warmup, so the policy keeps moving
     through the obstacle course instead of stalling.
+
+    Also STRENGTHENS reward_base_height_below_target -1.0 -> -10.0. Audits +
+    play showed the policy settles into a low posture and keeps sinking to the
+    minimum_height=0.22 termination (height_cutoff reset), which capped
+    terrain_levels at ~2 across 18k iters. At -1.0 a 0.08 m sag cost only
+    -0.08/step (vs tracking +1.5), so there was no incentive to stand tall.
+    -10.0 makes the same sag cost -0.8/step (same order as forward reward),
+    forcing an upright stance that clears the height cutoff.
     """
 
     reward_tracking_goal_vel = RewTerm(
@@ -614,6 +622,15 @@ class FlatStageOneStage2RewardsCfg(FlatStageOneRewardsCfg):
         params={
             "asset_cfg": SceneEntityCfg("robot"),
             "parkour_name": "base_parkour",
+        },
+    )
+    reward_base_height_below_target = RewTerm(
+        func=rewards.reward_base_height_below_target,
+        weight=-10.0,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "sensor_cfg": SceneEntityCfg("height_scanner"),
+            "target_height": 0.30,
         },
     )
 
