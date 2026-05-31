@@ -1,5 +1,56 @@
 # HANDOFF
 
+## 2026-05-31 · Stage-2 真正根因 = PPO 探索失稳(noise 爆炸),已上 noise-std 上限修复
+
+### 推翻之前的判断
+之前以为 Stage-2 卡 terrain_level~2 + episode_length 腰斩是 "h_f 权重 2.0 挤崩 v_hat"。
+**错。** 用新工具 `scripts/dump_tb_scalars.py` 拉昨晚崩溃 run
+(`2026-05-30_18-36-34_5gpu_highcap_stage2_from_flat3500`)的标量曲线,时序铁证:
+
+| iter | mean_noise_std | episode_len | terrain_lvl | reward |
+|------|---------------|-------------|-------------|--------|
+| 3500 | 0.033 | 14  | 0.91 | 0.36 | ← 从平地 walker resume(自信,近确定性) |
+| 3750 | 0.207 | 482 | 0.85 | 7.70 | noise 已开始爬,策略仍好 |
+| 4000 | 0.304 | 466 | 1.28 | 5.01 |
+| 4250 | 0.369 | 556 | 1.67 | 4.39 |
+| 4500 | 0.408 | **586(峰)** | **2.02(峰)** | 2.60 | 最佳点,noise 已 0.41 |
+| 4750 | 0.467 | 445 | 1.92 | 1.62 | noise 越过 ~0.45,episode_len 开始掉 |
+| 5000 | 0.537 | **187(崩)** | 1.44 | 1.80 | noise 0.54,平衡丢失 |
+| 6000 | 0.738 | 123 | 0.56 | 2.14 | 彻底崩,noise 仍在涨 |
+
+- `mean_noise_std` 从 0.033 **逐轮单调上涨**,episode_length/terrain_level 在 noise 越过 ~0.45 时崩。
+- estimator 的 v/h_f/height loss **全程在降**(它们从来不是病因——v_hat_rmse=0.84 是崩溃后期结果不是起因)。
+- 机理:平地 warmup 把 std 退火到 0.033(自信 walker)。resume 进 PPO(entropy_coef=0.01)后,
+  障碍地形回报太噪,surrogate 梯度压不住 std,**entropy bonus 无上限地把探索 std 顶上去** →
+  动作太随机 → 站不稳 → 回报更差 → 更没动力变确定 → 失控正反馈。
+
+### 修复(commit fe46729,单变量)
+- `SimpleActorCritic` 加可选 `max_noise_std`(默认 None=原行为)。设值后:
+  in-place clamp std 参数(挡住 Adam/entropy 顶上去)+ clamp 当步采样用的 std。
+- 新 runner `UnitreeGo2PIEFullParkourHighCapNoiseCapPPORunnerCfg` + 新 actor
+  `ParkourRslRlPIEHighCapNoiseCapActorCriticCfg`,**std 上限 0.40**
+  (取在已验证高产的 0.30-0.41 峰值带顶部,硬墙卡在 ~0.45 失控临界点下方)。
+- 新任务 `Isaac-PIE-FullParkour-HighCap-Stage2-NoiseCap-Unitree-Go2-v0`
+  (env 仍 FrontFastStage2,架构不变可直接 resume 平地 model_3500)。
+- **PPO entropy_coef / KL 调度没动**(单变量原则);cap 默认 None,只影响这一个 runner。
+- 已验证 clamp 数学(独立 smoke test:no-cap 自由长 / cap 卡 0.40 含参数 in-place / 低于上限不动)。
+
+### 部署状态
+- 停掉旧的(未加 cap、正沿同一 noise 曲线、~4750 必崩)`stage2d` run。
+- 用同 5 卡(CUDA 0-4)从平地 model_3500 重启:
+  run `5gpu_highcap_stage2_noisecap040_from_flat3500`,tmux `stage2d`,日志 `/tmp/train_stage2d_noisecap.log`。
+  已确认 resume 正常(iter 3509,noise 0.03,episode_len 回升 179→270)。
+- 工具:`scripts/dump_tb_scalars.py`(从 TB event 文件拉标量做时序诊断)。服务器 python:
+  `/mnt/data1/wgy/conda/envs/env_isaaclab/bin/python`。
+
+### 下一步要盯(关键)
+1. **`Mean action noise std` 应在 ~0.40 封顶**(过去会冲到 0.5+/1.0)。若仍越过 0.40 → cap 没生效。
+2. **过 iter 4750-5000(旧崩溃区)episode_length 不腰斩、terrain_level 持续爬** → 修复成立。
+3. 若 cap 后 terrain 卡住涨不动(探索不足) → 再考虑 entropy_coef 0.01→0.005 或放缓课程(不要同时改)。
+4. ~2000-3000 轮跑分地形审计看 step/slope 的 h_f/height RMSE。
+
+---
+
 ## 2026-05-30 · HighCap 感知增强 + 两阶段(平地warmup→全地形) + 一路诊断
 
 ### 起因
