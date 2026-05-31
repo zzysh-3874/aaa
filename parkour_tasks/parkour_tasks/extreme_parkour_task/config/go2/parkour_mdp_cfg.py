@@ -607,13 +607,17 @@ class FlatStageOneStage2RewardsCfg(FlatStageOneRewardsCfg):
     incentive carried over from the flat warmup, so the policy keeps moving
     through the obstacle course instead of stalling.
 
-    Also STRENGTHENS reward_base_height_below_target -1.0 -> -10.0. Audits +
-    play showed the policy settles into a low posture and keeps sinking to the
-    minimum_height=0.22 termination (height_cutoff reset), which capped
-    terrain_levels at ~2 across 18k iters. At -1.0 a 0.08 m sag cost only
-    -0.08/step (vs tracking +1.5), so there was no incentive to stand tall.
-    -10.0 makes the same sag cost -0.8/step (same order as forward reward),
-    forcing an upright stance that clears the height cutoff.
+    Also STRENGTHENS the base-height penalty but in a targeted way:
+    swaps reward_base_height_below_target (-1.0, all terrains) for
+    reward_base_height_below_target_flat_only at -4.0. Rationale: the
+    low-posture / sink-to-0.22 height_cutoff resets happen on the flat
+    segments (where the policy has no reason to crouch), so penalise sagging
+    there strongly enough to force an upright stance (-4.0 => -0.32/step at a
+    0.08 m sag, vs the old -0.08/step). Crucially the flat_only version zeroes
+    on obstacle sub-terrains, so the necessary crouch/load-up before a gap
+    jump or step is NOT penalised - protecting the jumping behaviour needed
+    for large gaps. -10.0 on all terrains was rejected as too strict (would
+    suppress obstacle crouching).
     """
 
     reward_tracking_goal_vel = RewTerm(
@@ -624,10 +628,14 @@ class FlatStageOneStage2RewardsCfg(FlatStageOneRewardsCfg):
             "parkour_name": "base_parkour",
         },
     )
-    reward_base_height_below_target = RewTerm(
-        func=rewards.reward_base_height_below_target,
-        weight=-10.0,
+    # Disable the all-terrain base-height penalty inherited from the parent...
+    reward_base_height_below_target = None
+    # ...and use the flat-only version (zeroed on obstacles) at a moderate -4.0.
+    reward_base_height_below_target_flat = RewTerm(
+        func=rewards.reward_base_height_below_target_flat_only,
+        weight=-4.0,
         params={
+            "parkour_name": "base_parkour",
             "asset_cfg": SceneEntityCfg("robot"),
             "sensor_cfg": SceneEntityCfg("height_scanner"),
             "target_height": 0.30,
