@@ -342,9 +342,15 @@ class ParkourRslRlPIEHighCapEstimatorCfg(ParkourRslRlPIEEstimatorCfg):
     z_m_dim: int = 64
     depth_feature_map_shape: tuple[int, int] = (8, 12)
     height_decoder_hidden_dims: tuple[int, ...] = (256, 128)
+    # h_f lowered 2.0 -> 1.0 and v raised 1.0 -> 1.5: the model_21750 audit
+    # showed v_hat_rmse blew up to [0.33, 0.22, 0.84] (was ~0.10) while h_f/
+    # height got accurate - i.e. the strong h_f weight (2.0) starved the shared
+    # GRU/attention trunk of velocity-estimation capacity. v_hat is the
+    # actor's most-relied-on feature, so its corruption stalled the policy
+    # (terrain_level stuck ~2, episode_length collapsed). Rebalance toward v_hat.
     loss_weights: dict[str, float] = {
-        "v": 1.0,
-        "h_f": 2.0,
+        "v": 1.5,
+        "h_f": 1.0,
         "height": 1.0,
         "next_proprio": 1.0,
         "kl": 1.0,
