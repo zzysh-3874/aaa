@@ -390,6 +390,47 @@ class UnitreeGo2PIEFullParkourHighCapPPORunnerCfg(UnitreeGo2PIEFullStage2WarmPPO
 
 
 # ---------------------------------------------------------------------------
+# HighCap Stage 2 with a hard noise-std ceiling.
+#
+# The Stage-2 collapse (2026-05-30_18-36-34) was diagnosed from the TB
+# scalars: resuming the flat walker (mean_noise_std=0.033 at iter 3500) into
+# PPO with entropy_coef=0.01, the action noise std climbed MONOTONICALLY every
+# iteration (0.21 -> 0.30 -> 0.37 -> 0.41 -> 0.47 -> 0.54 -> 0.74). Episode
+# length and terrain level peaked at iter 4500 (noise 0.41, terrain 2.0) and
+# then collapsed exactly as noise crossed ~0.45. The estimator losses were
+# never the cause - they kept improving throughout. Root cause: on noisy
+# obstacle returns the surrogate gradient cannot pin the std down, so the
+# entropy bonus inflates exploration without limit until the robot can no
+# longer balance.
+#
+# Fix: cap the exploration noise std at 0.40 - right at the proven-productive
+# peak (best terrain progress happened at 0.30-0.41) but a hard wall below the
+# ~0.45 runaway tipping point. This is the single-variable change; PPO
+# entropy_coef / KL schedule are left untouched. The cap defaults to None
+# (legacy) everywhere else, so only this runner is affected and a checkpoint
+# can resume into it (architecture unchanged).
+# ---------------------------------------------------------------------------
+@configclass
+class ParkourRslRlPIEHighCapNoiseCapActorCriticCfg(ParkourRslRlPIEHighCapActorCriticCfg):
+    """HighCap actor with a hard exploration-noise ceiling (anti-runaway)."""
+
+    max_noise_std: float | None = 0.40
+
+
+@configclass
+class UnitreeGo2PIEFullParkourHighCapNoiseCapPPORunnerCfg(UnitreeGo2PIEFullParkourHighCapPPORunnerCfg):
+    """HighCap Stage-2 runner that caps action noise std at 0.40.
+
+    Identical to ``UnitreeGo2PIEFullParkourHighCapPPORunnerCfg`` (same
+    estimator, save_interval, curriculum) except the actor clamps its
+    exploration std to 0.40, breaking the entropy-driven noise runaway that
+    collapsed the previous Stage-2 run around iter 4750-5000.
+    """
+
+    policy = ParkourRslRlPIEHighCapNoiseCapActorCriticCfg()
+
+
+# ---------------------------------------------------------------------------
 # Stage 0: flat-ground walking warmup for the high-capacity architecture.
 #
 # Audits + history show PIE from-scratch on the full obstacle mix fails to

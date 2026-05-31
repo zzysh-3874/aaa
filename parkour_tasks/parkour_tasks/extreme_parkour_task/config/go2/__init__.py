@@ -375,6 +375,25 @@ gym.register(
     },
 )
 
+
+# HighCap Stage 2 with a hard exploration-noise ceiling (std capped at 0.40).
+# Same env + estimator + reward as the regular HighCap Stage 2, but the actor
+# clamps its action noise std. This fixes the diagnosed Stage-2 collapse: the
+# previous run's mean_noise_std climbed monotonically 0.03->0.74 and balance
+# was lost once it crossed ~0.45 (episode length collapsed at iter ~4750-5000).
+# Resume the flat-warmup model_3500 into this task with
+# --reset_optimizer_on_resume (architecture is identical to the HighCap runner,
+# so the checkpoint loads cleanly).
+gym.register(
+    id="Isaac-PIE-FullParkour-HighCap-Stage2-NoiseCap-Unitree-Go2-v0",
+    entry_point="parkour_isaaclab.envs:ParkourManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.parkour_pie_cfg:UnitreeGo2PIEFullParkourFrontFastStage2EnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_pie_ppo_cfg:UnitreeGo2PIEFullParkourHighCapNoiseCapPPORunnerCfg",
+    },
+)
+
 # Terrain-adaptive (loss-only) variant: same FrontFast env, estimator uses
 # terrain_adaptive=2.0 but unchanged network shapes, so it can resume from a
 # FrontFast checkpoint (no architecture change).

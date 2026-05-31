@@ -254,6 +254,15 @@ class SimpleActorCritic(nn.Module):
         activation = resolve_nn_activation(activation)
         num_actor_obs = kwargs.pop("num_actor_obs", num_critic_obs)
         self.action_limit = kwargs.pop("action_limit", None)
+        # Hard ceiling on the exploration noise std. None = no cap (legacy
+        # behaviour). When set, the per-action std used for sampling, log-prob
+        # and entropy is clamped to this value, and the underlying std
+        # parameter is clamped in-place so Adam/entropy cannot push it past the
+        # cap. This breaks the entropy-driven noise-runaway that collapses a
+        # low-std (resumed flat walker) policy on obstacle terrain: audits of
+        # the Stage-2 crash showed mean_noise_std climbing monotonically
+        # 0.03->0.74 with episode length collapsing once it crossed ~0.45.
+        self.max_noise_std = kwargs.pop("max_noise_std", None)
 
         actor_layers = []
         actor_layers.append(nn.Linear(num_actor_obs, actor_hidden_dims[0]))
@@ -313,6 +322,18 @@ class SimpleActorCritic(nn.Module):
             std = torch.exp(self.log_std).expand_as(mean)
         else:
             raise ValueError(f"Unknown standard deviation type: {self.noise_std_type}. Should be 'scalar' or 'log'")
+        if self.max_noise_std is not None:
+            # Clamp the learnable std parameter in-place so optimizer steps and
+            # the entropy bonus cannot push exploration past the ceiling, then
+            # clamp the std used this step (handles the log parameterisation and
+            # keeps sampling/entropy consistent with the parameter).
+            cap = float(self.max_noise_std)
+            with torch.no_grad():
+                if self.noise_std_type == "scalar":
+                    self.std.clamp_(max=cap)
+                elif self.noise_std_type == "log":
+                    self.log_std.clamp_(max=float(torch.log(torch.tensor(cap))))
+            std = std.clamp(max=cap)
         self.distribution = Normal(mean, std)
 
     def act(self, observations, *args, **kwargs):
