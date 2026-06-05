@@ -356,6 +356,87 @@ def pie_foothold_terrain_target(
     return torch.clip(torch.stack(values, dim=-1), -1.0, 1.0).to(env.device)
 
 
+# START per-foot local heightmap (Ĥᶠ): a small grid around each foot in the
+# robot yaw frame. Faithful to arXiv 2409.15692 sec II-A / Appendix-C, which
+# estimates "the heightmap within 0.1m around each foot" (not just a scalar
+# clearance). Output: (B, 4*grid_h*grid_w) terrain heights relative to nominal
+# body height, sampled from the body height scanner by nearest-neighbour, in
+# the same clip/sign convention as the other PIE targets.
+PIE_FOOT_HEIGHTMAP_OFFSETS = (
+    (0.45, 0.22),    # FL nominal foothold (yaw-frame x,y)
+    (0.45, -0.22),   # FR
+    (-0.05, 0.22),   # RL
+    (-0.05, -0.22),  # RR
+)
+
+
+def pie_foot_heightmap_target(
+    env: ParkourManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg = SceneEntityCfg("height_scanner"),
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    foot_offsets: tuple[tuple[float, float], ...] = PIE_FOOT_HEIGHTMAP_OFFSETS,
+    grid_shape: tuple[int, int] = (3, 3),
+    grid_step: float = 0.10,
+    nominal_base_height: float = 0.30,
+) -> torch.Tensor:
+    """Per-foot local terrain heightmap target (START Ĥᶠ).
+
+    For each of the 4 legs, sample a ``grid_shape`` (default 3x3) heightmap
+    centred on the leg's nominal foothold in the robot yaw frame, with spacing
+    ``grid_step`` (default 0.1 m -> covers +-0.1 m, i.e. the paper's 0.1 m
+    foot neighbourhood). Heights are terrain_z - base_z + nominal_base_height,
+    so 0 = flat ground at nominal stance and the sign matches the body
+    height-scan target. Sampled from the body height-scanner raycast by
+    nearest neighbour (no extra sensor needed). Output (B, 4*gh*gw); with the
+    3x3 default this is (B, 36).
+    """
+    ray_sensor: RayCaster = env.scene.sensors[sensor_cfg.name]
+    asset: Articulation = env.scene[asset_cfg.name]
+
+    q = asset.data.root_quat_w
+    yaw = torch.atan2(
+        2.0 * (q[:, 0] * q[:, 3] + q[:, 1] * q[:, 2]),
+        1.0 - 2.0 * (q[:, 2] ** 2 + q[:, 3] ** 2),
+    )
+    cos_yaw = torch.cos(yaw).unsqueeze(1)
+    sin_yaw = torch.sin(yaw).unsqueeze(1)
+
+    ray_hits_w = ray_sensor.data.ray_hits_w  # (B, R, 3)
+    rel_xy_w = ray_hits_w[..., :2] - asset.data.root_pos_w[:, None, :2]
+    rel_x = rel_xy_w[..., 0]
+    rel_y = rel_xy_w[..., 1]
+    # Express ray hits in the robot yaw frame.
+    ray_x_b = cos_yaw * rel_x + sin_yaw * rel_y  # (B, R)
+    ray_y_b = -sin_yaw * rel_x + cos_yaw * rel_y
+    ray_xy_b = torch.stack((ray_x_b, ray_y_b), dim=-1)  # (B, R, 2)
+
+    terrain_delta = ray_hits_w[..., 2] - asset.data.root_pos_w[:, 2].unsqueeze(1) + nominal_base_height
+    finite = torch.isfinite(ray_xy_b).all(dim=-1) & torch.isfinite(terrain_delta)
+    inf = torch.full_like(terrain_delta, float("inf"))
+    zeros = torch.zeros_like(terrain_delta[:, 0])
+
+    gh, gw = grid_shape
+    # Grid sample offsets centred on 0 (e.g. 3x3 with step 0.1 -> {-0.1,0,0.1}).
+    xs = (torch.arange(gh, device=ray_xy_b.device) - (gh - 1) / 2.0) * grid_step
+    ys = (torch.arange(gw, device=ray_xy_b.device) - (gw - 1) / 2.0) * grid_step
+
+    values = []
+    for offset_xy in foot_offsets:
+        for dx in xs:
+            for dy in ys:
+                target = ray_xy_b.new_tensor(
+                    (float(offset_xy[0]) + float(dx), float(offset_xy[1]) + float(dy))
+                )
+                dist_sq = torch.sum(torch.square(ray_xy_b - target), dim=-1)
+                finite_dist = torch.where(finite, dist_sq, inf)
+                nearest_idx = torch.argmin(finite_dist, dim=1)
+                nearest = terrain_delta.gather(1, nearest_idx.unsqueeze(1)).squeeze(1)
+                value = torch.where(torch.isfinite(nearest), nearest, zeros)
+                values.append(value)
+
+    return torch.clip(torch.stack(values, dim=-1), -1.0, 1.0).to(env.device)
+
+
 def pie_critic_observation(
     env: ParkourManagerBasedRLEnv,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),

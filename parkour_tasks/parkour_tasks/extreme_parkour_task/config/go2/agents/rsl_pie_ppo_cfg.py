@@ -588,3 +588,51 @@ class UnitreeGo2PIESTARTStage2PPORunnerCfg(UnitreeGo2PIEFullParkourHighCapNoiseC
 
     estimator = ParkourRslRlPIESTARTEstimatorCfg()
     policy = ParkourRslRlPIEHighCapNoiseCapActorCriticCfg()
+
+
+# ---------------------------------------------------------------------------
+# START per-foot heightmap (Ĥᶠ) variant: h_f_hat regresses a 4-leg x 3x3 = 36
+# local heightmap instead of the 4-dim corridor demand (arXiv 2409.15692
+# Appendix-C: "estimate the heightmap within 0.1m around each foot" beats a
+# scalar clearance; Stepping Beams MEV 0.14 vs 0.52). Stacks on the full START
+# estimator (refine + heightmap-encoded z_m + AdaSmpl). foot_height_dim=36
+# widens the h_f head/target/storage and the actor input:
+#   actor input = proprio(47) + z_m(64) + z_mu(32) + v_hat(3) + h_f(36) = 182.
+# NOT checkpoint-compatible (h_f + actor dims changed); train from the START
+# FootHmap flat warmup.
+# ---------------------------------------------------------------------------
+@configclass
+class ParkourRslRlPIESTARTFootHmapEstimatorCfg(ParkourRslRlPIESTARTEstimatorCfg):
+    """START estimator with per-foot 3x3 heightmap h_f (36-dim)."""
+
+    foot_height_dim: int = 36
+
+
+@configclass
+class ParkourRslRlPIESTARTFootHmapFlatWarmupEstimatorCfg(ParkourRslRlPIESTARTFlatWarmupEstimatorCfg):
+    """Flat-warmup START estimator with per-foot 3x3 heightmap h_f (36-dim)."""
+
+    foot_height_dim: int = 36
+
+
+@configclass
+class ParkourRslRlPIESTARTFootHmapActorCriticCfg(ParkourRslRlPIEHighCapNoiseCapActorCriticCfg):
+    """Actor for the per-foot heightmap variant: h_f=36 widens input to 182."""
+
+    num_actor_obs: int = 182
+
+
+@configclass
+class UnitreeGo2PIESTARTFootHmapFlatWarmupPPORunnerCfg(UnitreeGo2PIESTARTFlatWarmupPPORunnerCfg):
+    """Stage-0 flat warmup for the START per-foot-heightmap architecture."""
+
+    estimator = ParkourRslRlPIESTARTFootHmapFlatWarmupEstimatorCfg()
+    policy = ParkourRslRlPIESTARTFootHmapActorCriticCfg()
+
+
+@configclass
+class UnitreeGo2PIESTARTFootHmapStage2PPORunnerCfg(UnitreeGo2PIESTARTStage2PPORunnerCfg):
+    """START Stage-2 obstacle runner with per-foot 3x3 heightmap h_f (36-dim)."""
+
+    estimator = ParkourRslRlPIESTARTFootHmapEstimatorCfg()
+    policy = ParkourRslRlPIESTARTFootHmapActorCriticCfg()

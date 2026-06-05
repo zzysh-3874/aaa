@@ -1,5 +1,41 @@
 # HANDOFF
 
+## 2026-06-05 (part 4) · 对齐 START 收尾：缺口1(脚周围高度图 Ĥᶠ) + 缺口5(feet_edge 核对)
+
+对照 START 全部组件后,只剩两项未对齐,本次处理:
+
+**缺口 5 — feet_edge 核对结果:已对齐,不改。**
+本仓 `reward_feet_edge`(rewards.py)用 `edge_width_thresh=0.05` 单档 `binary_dilation` 边缘掩码
+× 接触 filter × (terrain_level>3 门控),与 START 的双档[2.5,5.0]cm 膨胀机制等价(5cm 是 START 外档)。
+加内档 2.5cm 边际收益小却要动 mesh 生成(高风险),判定跳过。
+
+**缺口 1 — 脚周围高度图 Ĥᶠ:已实现(opt-in)。**
+START Appendix-C 证明 h_f 用"每脚 0.1m 高度图"比标量 clearance 强(Stepping Beams MEV 0.14 vs 0.52)。
+- 新观测 `observations.pie_foot_heightmap_target`:每腿在 yaw frame 取脚周围 3x3 网格(±0.1m,步长 0.1m),
+  最近邻从 height_scanner 采样,terrain_z-base_z+0.30(0=平地),clip[-1,1]。4 腿×9 = **36 维**。
+- estimator `foot_height_dim` 36 → h_f head/next_proprio decoder/storage 自动扩到 36。
+- rollout storage:`init_pie_estimator_storage` 现从 estimator 读 `foot_height_dim`/`height_dim` 传
+  `target_shapes`(之前硬编码 foot=4 会 shape 报错)。
+- actor 输入 = 47+64+32+3+**36** = **182**(corridor 版是 150)。
+- **不兼容 corridor/HighCap checkpoint**(h_f 维+actor 维都变),要从 FootHmap 平地 warmup 重训。
+
+**新任务/配置**:
+- env:`UnitreeGo2PIEFullParkourFrontFastStage2FootHmapEnvCfg`(__post_init__ 把 foot_clearance obs 换成
+  `pie_foot_heightmap_target`)、`UnitreeGo2PIEFlatParkourWarmupFootHmapEnvCfg`(平地版,保持 36 维一致以便 resume)。
+- estimator/actor/runner:`ParkourRslRlPIESTARTFootHmap{,FlatWarmup}EstimatorCfg`(foot_height_dim=36)、
+  `ParkourRslRlPIESTARTFootHmapActorCriticCfg`(num_actor_obs=182)、
+  `UnitreeGo2PIESTARTFootHmap{FlatWarmup,Stage2}PPORunnerCfg`。
+- 任务:`Isaac-PIE-FullParkour-START-FootHmap-{FlatWarmup,Stage2}-Unitree-Go2-v0`。
+
+**验证**:全部 py_compile 通过;独立 smoke(foot_height_dim=36)确认 h_f head=36、z_m=64、actor=182、
+dual loss 有限+梯度回流。
+
+**现在有两条 START 路线可选**:
+- `START`(缺口未补,h_f=4 corridor):actor 150,sim2real 最稳,信息量小。
+- `START-FootHmap`(缺口1补全,h_f=36):actor 182,信息量大(论文命门),但对相机外参/depth 噪声更敏感、
+  网络略大。两条都带 refine+AdaSmpl+noise-cap。
+建议:若主攻 gap 精确落脚 → 用 FootHmap;若先求稳/快验证 → 用 START。两者都要先平地 warmup 再 resume Stage2。
+
 ## 2026-06-05 (part 3) · 按 START 论文增补：高度图两级重建(B) + AdaSmpl(A)，A+B 一起上
 
 借鉴 START / "Walking with Terrain Reconstruction"(arXiv 2409.15692，PIE 同团队 ZJU)。

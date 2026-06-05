@@ -829,6 +829,42 @@ class UnitreeGo2PIEFullParkourFrontFastStage2PlayEnvCfg(
         # robots across rows 0..play_init_level (a mix that includes the hard
         # rows), rather than all starting on the easy level-0 obstacles.
         self.scene.terrain.max_init_terrain_level = self.play_init_level
+
+
+@configclass
+class UnitreeGo2PIEFullParkourFrontFastStage2FootHmapEnvCfg(
+    UnitreeGo2PIEFullParkourFrontFastStage2EnvCfg
+):
+    """START per-foot heightmap (Ĥᶠ) variant of the Stage-2 env.
+
+    Identical to the Stage-2 env except the ``foot_clearance`` estimator target
+    is swapped from the 4-dim corridor demand to a per-foot local heightmap
+    (4 legs x 3x3 grid = 36 dims), faithful to START (arXiv 2409.15692
+    Appendix-C: "estimate the heightmap within 0.1m around each foot"). The
+    storage/loss key stays ``foot_clearance`` so the pipeline is unchanged, but
+    its width is now 36 -> the estimator must use foot_height_dim=36 and the
+    actor num_actor_obs grows to 182 (47+64+32+3+36). NOT checkpoint-compatible.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        from parkour_isaaclab.envs.mdp import observations as _obs
+
+        foot_term = self.observations.estimator_targets.foot_clearance
+        foot_term.func = _obs.pie_foot_heightmap_target
+        foot_term.params = {
+            "sensor_cfg": SceneEntityCfg("height_scanner"),
+            "asset_cfg": SceneEntityCfg("robot"),
+            "foot_offsets": (
+                (0.45, 0.22),
+                (0.45, -0.22),
+                (-0.05, 0.22),
+                (-0.05, -0.22),
+            ),
+            "grid_shape": (3, 3),
+            "grid_step": 0.10,
+            "nominal_base_height": 0.30,
+        }
     """Easy variant of Stage 2 warm-up: every obstacle starts at 5 cm.
 
     Layout, rewards, terminations and command stack are identical to
@@ -985,8 +1021,35 @@ class UnitreeGo2PIEFlatParkourWarmupEnvCfg(UnitreeGo2PIEFlatParkourEnvCfg):
 
 
 @configclass
-class UnitreeGo2PIEParkourEnvCfg_StableEasyHeightBridge(UnitreeGo2PIEParkourEnvCfg_StableEasy):
-    """Bridge curriculum after Gentle warmup: faster commands and less height shaping."""
+class UnitreeGo2PIEFlatParkourWarmupFootHmapEnvCfg(UnitreeGo2PIEFlatParkourWarmupEnvCfg):
+    """Flat warmup env producing the 36-dim per-foot heightmap target.
+
+    Same flat warmup (terrain losses off) but swaps the ``foot_clearance``
+    estimator target to the START per-foot heightmap so the rollout storage
+    width (36) matches the FootHmap Stage-2 env, letting Stage-2 resume the
+    warmup checkpoint. On flat ground the target is ~0 everywhere and h_f loss
+    is off anyway; this only keeps shapes consistent across stages.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        from parkour_isaaclab.envs.mdp import observations as _obs
+
+        foot_term = self.observations.estimator_targets.foot_clearance
+        foot_term.func = _obs.pie_foot_heightmap_target
+        foot_term.params = {
+            "sensor_cfg": SceneEntityCfg("height_scanner"),
+            "asset_cfg": SceneEntityCfg("robot"),
+            "foot_offsets": (
+                (0.45, 0.22),
+                (0.45, -0.22),
+                (-0.05, 0.22),
+                (-0.05, -0.22),
+            ),
+            "grid_shape": (3, 3),
+            "grid_step": 0.10,
+            "nominal_base_height": 0.30,
+        }
 
     commands: PIEBridgeCommandsCfg = PIEBridgeCommandsCfg()
     rewards: PIEBridgeRewardsCfg = PIEBridgeRewardsCfg()

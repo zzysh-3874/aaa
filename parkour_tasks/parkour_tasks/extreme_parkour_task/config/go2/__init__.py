@@ -520,3 +520,28 @@ gym.register(
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_pie_ppo_cfg:UnitreeGo2PIESTARTStage2PPORunnerCfg",
     },
 )
+
+# START per-foot heightmap (Ĥᶠ) variants: h_f_hat regresses a 4-leg x 3x3 = 36
+# local heightmap (arXiv 2409.15692 Appendix-C) instead of the 4-dim corridor
+# demand. actor input grows to 182. NOT compatible with corridor/HighCap
+# checkpoints. Two-stage: train FootHmap flat warmup, then resume FootHmap
+# Stage-2 with --reset_optimizer_on_resume.
+gym.register(
+    id="Isaac-PIE-FullParkour-START-FootHmap-FlatWarmup-Unitree-Go2-v0",
+    entry_point="parkour_isaaclab.envs:ParkourManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.parkour_pie_cfg:UnitreeGo2PIEFlatParkourWarmupFootHmapEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_pie_ppo_cfg:UnitreeGo2PIESTARTFootHmapFlatWarmupPPORunnerCfg",
+    },
+)
+
+gym.register(
+    id="Isaac-PIE-FullParkour-START-FootHmap-Stage2-Unitree-Go2-v0",
+    entry_point="parkour_isaaclab.envs:ParkourManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.parkour_pie_cfg:UnitreeGo2PIEFullParkourFrontFastStage2FootHmapEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_pie_ppo_cfg:UnitreeGo2PIESTARTFootHmapStage2PPORunnerCfg",
+    },
+)

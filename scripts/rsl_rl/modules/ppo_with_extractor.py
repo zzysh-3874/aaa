@@ -255,9 +255,22 @@ class PPOWithExtractor(PPO):
     def init_pie_estimator_storage(self, num_envs: int, num_transitions_per_env: int):
         if not self.uses_pie_estimator:
             return
+        # Derive target shapes from the estimator so a non-default foot-clearance
+        # dim (e.g. START per-foot heightmap = 36) or height dim is stored at the
+        # right width instead of the hardcoded defaults (foot_clearance=4).
+        target_shapes = None
+        foot_dim = int(getattr(self.estimator, "foot_height_dim", 0) or 0)
+        height_dim = int(getattr(self.estimator, "height_dim", 0) or 0)
+        if foot_dim or height_dim:
+            target_shapes = {}
+            if foot_dim:
+                target_shapes["foot_clearance"] = (foot_dim,)
+            if height_dim:
+                target_shapes["height_scan"] = (height_dim,)
         self.pie_estimator_storage = PIEEstimatorRolloutStorage(
             num_envs=num_envs,
             num_transitions_per_env=num_transitions_per_env,
+            target_shapes=target_shapes,
             device=self.device,
         )
 
