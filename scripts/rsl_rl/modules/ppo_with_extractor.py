@@ -199,13 +199,48 @@ class PPOWithExtractor(PPO):
             self.pie_actor_rnn_hidden = self.estimator.initial_hidden(batch_size, device=policy_obs.device)
 
         with torch.no_grad():
-            predictions = self.estimator.forward_obs_dict(obs_dict, hidden_state=self.pie_actor_rnn_hidden)
+            # START AdaSmpl during rollout: with probability pie_adasmpl_prob,
+            # the actor's terrain code is encoded from the GROUND-TRUTH height
+            # map (clear features) instead of the depth reconstruction, so the
+            # robot can act well early and reach sparse rewards before its
+            # reconstruction is accurate. Only active when the heightmap encoder
+            # exists, AdaSmpl is on, and prob>0 (training only; 0 at play).
+            gt_heightmap = None
+            adasmpl_prob = 0.0
+            if (
+                getattr(self, "pie_use_adasmpl", False)
+                and self.pie_adasmpl_prob > 0.0
+                and getattr(self.estimator, "heightmap_encoder", None) is not None
+            ):
+                gt_heightmap = self._extract_gt_heightmap(obs_dict)
+                if gt_heightmap is not None:
+                    adasmpl_prob = self.pie_adasmpl_prob
+            predictions = self.estimator.forward_obs_dict(
+                obs_dict,
+                hidden_state=self.pie_actor_rnn_hidden,
+                gt_heightmap=gt_heightmap,
+                adasmpl_prob=adasmpl_prob,
+            )
             features = self._prepare_pie_actor_features(predictions)
             self.pie_actor_rnn_hidden = predictions["rnn_hidden"].detach()
 
         if self.detach_pie_actor_features:
             features = [feature.detach() for feature in features]
         return torch.cat((policy_obs, *features), dim=-1)
+
+    @staticmethod
+    def _extract_gt_heightmap(
+        obs_dict: Mapping[str, torch.Tensor | Mapping[str, torch.Tensor]] | None,
+    ) -> torch.Tensor | None:
+        """Pull the ground-truth body height scan from the estimator targets, if present."""
+        if obs_dict is None:
+            return None
+        targets = obs_dict.get("estimator_targets")
+        if isinstance(targets, Mapping):
+            hm = targets.get("height_scan")
+            if hm is not None:
+                return hm if isinstance(hm, torch.Tensor) else None
+        return None
 
     def _prepare_pie_actor_features(self, predictions: Mapping[str, torch.Tensor]) -> list[torch.Tensor]:
         features = [predictions[key] for key in self.pie_actor_feature_keys]

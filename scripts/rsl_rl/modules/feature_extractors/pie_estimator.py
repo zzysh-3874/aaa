@@ -262,15 +262,15 @@ class PIEEstimator(nn.Module):
             # START AdaSmpl: the actor consumes an ENCODING of the heightmap.
             # During training, with probability adasmpl_prob, encode the
             # ground-truth heightmap (clear features speed up learning); else
-            # encode the network's own refined reconstruction. At inference
-            # (adasmpl_prob=0 / no gt) it always encodes the reconstruction, so
-            # deployment uses only depth-derived terrain.
+            # encode the network's own refined reconstruction. Safety: GT is
+            # only ever supplied (gt_heightmap not None) with adasmpl_prob > 0,
+            # and adasmpl_prob is only raised by the training loop - at
+            # play/deployment it stays 0 (and real robots have no GT), so this
+            # path then always encodes the reconstruction. We deliberately do
+            # NOT gate on self.training so the rollout (eval-mode) actor can
+            # also see GT early on, which is the whole point of AdaSmpl.
             policy_heightmap = height_refined
-            if (
-                self.training
-                and gt_heightmap is not None
-                and adasmpl_prob > 0.0
-            ):
+            if gt_heightmap is not None and adasmpl_prob > 0.0:
                 gt_heightmap = gt_heightmap.to(device=height_refined.device, dtype=height_refined.dtype)
                 # Per-sample Bernoulli mask so a fraction of the batch sees GT.
                 use_gt = (torch.rand(height_refined.shape[0], 1, device=height_refined.device) < adasmpl_prob)
