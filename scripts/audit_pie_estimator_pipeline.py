@@ -554,11 +554,22 @@ def forward_estimator_internal(
 
     v_hat = estimator.v_head(y)
     h_f_hat = estimator.h_f_head(y)
-    z_m = estimator.z_m_head(y)
+    z_b = estimator.z_m_head(y)
     z_mu = estimator.z_mu_head(y)
     z_logvar = estimator.z_logvar_head(y)
     z = estimator._latent_sample(z_mu, z_logvar)
-    height_hat = estimator.height_decoder(z_m)
+    # START: rough heightmap -> optional refine; actor z_m may be an encoding of
+    # the (refined) heightmap rather than the raw head. Mirror forward() so the
+    # manual-vs-builtin self-check stays valid for both legacy and START.
+    height_rough = estimator.height_decoder(z_b)
+    if getattr(estimator, "height_refine", None) is not None:
+        height_hat = estimator.height_refine(height_rough)
+    else:
+        height_hat = height_rough
+    if getattr(estimator, "heightmap_encoder", None) is not None:
+        z_m = estimator.heightmap_encoder(height_hat)
+    else:
+        z_m = z_b
     next_proprio_hat = estimator.next_proprio_decoder(torch.cat((z, v_hat, h_f_hat), dim=-1))
     predictions = {
         "v_hat": v_hat,
@@ -569,6 +580,7 @@ def forward_estimator_internal(
         "z_mu": z_mu,
         "z_logvar": z_logvar,
         "height_hat": height_hat,
+        "height_hat_rough": height_rough,
         "next_proprio_hat": next_proprio_hat,
         "rnn_hidden": next_hidden_state,
     }

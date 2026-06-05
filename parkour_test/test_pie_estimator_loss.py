@@ -37,7 +37,16 @@ def test_pie_estimator_loss_random_tensor_backward():
 
     losses = loss_module.compute_pie_estimator_loss(predictions, targets, weights={"kl": 0.01})
 
-    expected_keys = {"loss", "loss_v", "loss_hf", "loss_height", "loss_next_proprio", "loss_kl"}
+    expected_keys = {
+        "loss",
+        "loss_v",
+        "loss_hf",
+        "loss_height",
+        "loss_height_rough",
+        "loss_height_refined_l1",
+        "loss_next_proprio",
+        "loss_kl",
+    }
     assert set(losses.keys()) == expected_keys
     for value in losses.values():
         assert value.ndim == 0

@@ -783,7 +783,52 @@ class UnitreeGo2PIEFullParkourFrontFastStage2EnvCfg(
 
 
 @configclass
-class UnitreeGo2PIEFullParkourEasyEnvCfg(UnitreeGo2PIEFullParkourStage2WarmEnvCfg):
+class UnitreeGo2PIEFullParkourFrontFastStage2PlayEnvCfg(
+    UnitreeGo2PIEFullParkourFrontFastStage2EnvCfg
+):
+    """PLAY-ONLY variant: relaxed termination + spawn directly on hard terrain.
+
+    Identical to the training env (same curriculum shaping, rewards, network)
+    except two play-only changes:
+
+    1. Relaxed ``terminate_episode`` roll/pitch/height cutoffs so a visual play
+       session is not cut short by brief dynamic poses.
+    2. ``max_init_terrain_level = play_init_level`` (default 6) so play spawns
+       the robots directly on the high-difficulty rows the policy has actually
+       trained up to. The training env keeps ``max_init_terrain_level=0`` (every
+       reset starts easy and the curriculum promotes upward), so by default a
+       play session would only ever show the easy level-0 obstacles. Forcing a
+       high init level lets you watch the policy on the genuinely hard
+       (level ~5-6) gap / step / slope obstacles it reached in training.
+
+    NEVER train with this. Looser cutoffs let degenerate low/tilted gaits ride
+    out episodes and bank fake reward, and a high init level skips the
+    curriculum. Training keeps the tight Stage-2 cutoffs (0.20 m / 1.0 / 1.4
+    rad) and ``max_init_terrain_level=0``.
+
+    Relaxed cutoffs:
+        minimum_height: 0.20 -> 0.12 m  (let it crouch low without reset)
+        max_roll:       1.0  -> 1.6 rad
+        max_pitch:      1.4  -> 1.6 rad
+    """
+
+    # Terrain row to spawn play robots on (0-9 for the 10-row full-parkour
+    # mix). 6 is just above the ~5.5 level training had reached, so play shows
+    # the hard obstacles. Override on the command line is not wired, so edit
+    # here if you want a different difficulty.
+    play_init_level: int = 6
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.terminations.total_terminates.params["minimum_height"] = 0.12
+        self.terminations.total_terminates.params["max_roll"] = 1.6
+        self.terminations.total_terminates.params["max_pitch"] = 1.6
+        print(f"[PLAY-ENV] relaxed terminations applied: {self.terminations.total_terminates.params}")
+        # Spawn directly on hard terrain instead of level 0. Each env's start
+        # level is randint(0, max_init_terrain_level+1), so this spreads play
+        # robots across rows 0..play_init_level (a mix that includes the hard
+        # rows), rather than all starting on the easy level-0 obstacles.
+        self.scene.terrain.max_init_terrain_level = self.play_init_level
     """Easy variant of Stage 2 warm-up: every obstacle starts at 5 cm.
 
     Layout, rewards, terminations and command stack are identical to

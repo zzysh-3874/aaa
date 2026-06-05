@@ -504,3 +504,87 @@ class UnitreeGo2PIEBridgeLoadFixPPORunnerCfg(UnitreeGo2PIEBridgePPORunnerCfg):
     """Bridge runner with denser checkpointing for load and propulsion diagnostics."""
 
     save_interval = 250
+
+
+# ---------------------------------------------------------------------------
+# START-style perception (arXiv 2409.15692 "Walking with Terrain
+# Reconstruction", PIE same team). Two additions on top of HighCap:
+#   (B) Two-stage heightmap reconstruction: z_m_head -> rough heightmap
+#       (MLP, MSE) -> conv U-Net-lite refine (L1). The 132-dim height scan is
+#       treated as a 12x11 grid (height_scanner GridPattern res=0.15
+#       size=[1.65,1.5]). The refined map is what the actor's z_m encodes.
+#   (A) AdaSmpl: during the estimator update, a fraction of samples encode the
+#       GROUND-TRUTH heightmap into z_m instead of the reconstruction, with
+#       probability p = min(tanh(CV(reward)), pie_adasmpl_max_prob). High early
+#       reward variance -> more GT sampling; converged -> ~0 so deployment uses
+#       pure reconstruction. The actor consumes z_m = heightmap_encoder(map),
+#       so AdaSmpl genuinely changes what the policy sees (faithful to START).
+#
+# Because z_m now = encode(heightmap) rather than a free head, z_m semantics
+# change -> NOT checkpoint-compatible with prior HighCap runs; train from the
+# flat warmup. actor input is unchanged (z_m still 64) so num_actor_obs=150.
+# height_rough/height_refined_l1 loss weights add the dual supervision; the
+# base "height" MSE is kept small for stability.
+# ---------------------------------------------------------------------------
+@configclass
+class ParkourRslRlPIESTARTEstimatorCfg(ParkourRslRlPIEHighCapEstimatorCfg):
+    """HighCap estimator + START heightmap refine + heightmap-encoded z_m + AdaSmpl."""
+
+    use_height_refine: bool = True
+    use_heightmap_encoder: bool = True
+    height_grid_shape: tuple[int, int] = (12, 11)
+    height_refine_hidden_channels: int = 16
+    pie_use_adasmpl: bool = True
+    pie_adasmpl_max_prob: float = 0.8
+    loss_weights: dict[str, float] = {
+        "v": 1.5,
+        "h_f": 1.0,
+        "height": 0.5,            # keep a small refined-map MSE for stability
+        "next_proprio": 1.0,
+        "kl": 1.0,
+        "terrain_adaptive": 2.0,
+        "height_rough": 1.0,      # START rough-map MSE
+        "height_refined_l1": 1.0,  # START refined-map L1
+    }
+
+
+@configclass
+class ParkourRslRlPIESTARTFlatWarmupEstimatorCfg(ParkourRslRlPIESTARTEstimatorCfg):
+    """START estimator for the flat warmup: terrain (h_f/height) losses OFF so
+    flat ground does not teach a depth-ignoring proprio shortcut, but the
+    refine/encoder modules still exist so the obstacle stage can resume."""
+
+    loss_weights: dict[str, float] = {
+        "v": 1.0,
+        "h_f": 0.0,
+        "height": 0.0,
+        "next_proprio": 1.0,
+        "kl": 1.0,
+        "terrain_adaptive": 0.0,
+        "height_rough": 0.0,
+        "height_refined_l1": 0.0,
+    }
+
+
+@configclass
+class UnitreeGo2PIESTARTFlatWarmupPPORunnerCfg(UnitreeGo2PIEHighCapFlatWarmupPPORunnerCfg):
+    """Stage-0 flat warmup for the START architecture.
+
+    Same network as the START Stage-2 runner (so the obstacle stage can resume
+    from its checkpoint) but with terrain losses off and AdaSmpl effectively
+    inert (no rough/height loss to benefit from GT on flat ground). NoiseCap
+    actor (std<=0.40) carried for stable warmup exploration.
+    """
+
+    estimator = ParkourRslRlPIESTARTFlatWarmupEstimatorCfg()
+    policy = ParkourRslRlPIEHighCapNoiseCapActorCriticCfg()
+
+
+@configclass
+class UnitreeGo2PIESTARTStage2PPORunnerCfg(UnitreeGo2PIEFullParkourHighCapNoiseCapPPORunnerCfg):
+    """START Stage-2 obstacle runner: heightmap refine + heightmap-encoded z_m +
+    AdaSmpl, on top of the NoiseCap (std<=0.40) actor. Resume from the START
+    flat warmup checkpoint with --reset_optimizer_on_resume."""
+
+    estimator = ParkourRslRlPIESTARTEstimatorCfg()
+    policy = ParkourRslRlPIEHighCapNoiseCapActorCriticCfg()

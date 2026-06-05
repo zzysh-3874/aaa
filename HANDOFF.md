@@ -1,5 +1,111 @@
 # HANDOFF
 
+## 2026-06-05 (part 3) · 按 START 论文增补：高度图两级重建(B) + AdaSmpl(A)，A+B 一起上
+
+借鉴 START / "Walking with Terrain Reconstruction"(arXiv 2409.15692，PIE 同团队 ZJU)。
+读全文确认其核心 = 用 depth 重建局部高度图作显式中间表示喂 policy(避免外部建图/定位/动捕，
+真机只需 depth+proprio，sim2real 接口不变)。其真机 0.7m gap 成功率 1.0(正是本项目目标数字)。
+
+**实现的两个机制(都 opt-in，默认关闭=向后兼容)**：
+
+**B 两级高度图重建**(`pie_estimator.py`)：
+- 新增 `HeightmapRefineDecoder`(conv U-Net-lite，单跳连接，残差精修)。
+- z_m_head → `height_decoder` 出粗高度图(12×11=132，对应 height_scanner GridPattern res0.15 size[1.65,1.5])
+  → refine 出精修图。loss：粗图 MSE(`height_rough`) + 精修图 L1(`height_refined_l1`)，对齐论文 sec II-B。
+- `loss_weights` 新增 `height_rough`/`height_refined_l1`(默认 0)。loss dict 多两个 key,已更新单测断言。
+
+**A AdaSmpl**(`pie_estimator.py` + `ppo_with_extractor.py` + `on_policy_runner_with_extractor.py`)：
+- 新增 `heightmap_encoder`：actor 的 z_m 改成 `encode(高度图)`(精修重建图，或训练早期的 GT 图)。
+  这样 AdaSmpl 真正改变 policy 看到的东西(忠实 START)。z_m 仍 64 维 → actor 输入仍 150。
+- 采样概率 `p = min(tanh(CV(reward)), max_prob)`，每轮由 runner 从 rewbuffer 算
+  (`set_pie_adasmpl_prob_from_rewards`)。早期 reward 波动大→多喂 GT；收敛→~0→部署纯重建。
+- per-sample Bernoulli mask，只在 `self.training` 且给了 gt_heightmap 时生效；推理 prob=0 → 纯重建。
+
+**关键代价/性质**：
+- z_m 语义从"自由 head"变成"encode(高度图)" → **不兼容旧 HighCap checkpoint，要从 START 平地 warmup 重训**。
+- actor 输入维度不变(150)、sim2real 接口不变(depth 2×58×87/proprio 47/action 12)。
+- 真机注意点：①相机外参(pos 0.33,0,0.08 / 朝下角，配置 euler[180,70,-90])必须仿真↔真机一致
+  ②AdaSmpl 部署前 prob 必须→0(纯重建) ③U-Net 增推理开销，核对真机算力 ④depth 噪声/空洞/延迟
+  域随机化仍缺(第三阶段必补，高度图方案对 depth 质量更敏感)。
+
+**新任务/配置**(`rsl_pie_ppo_cfg.py` + `__init__.py`)：
+- estimator cfg：`ParkourRslRlPIESTARTEstimatorCfg`(refine+encoder+adasmpl+dual loss,基于 HighCap z_m64)、
+  `ParkourRslRlPIESTARTFlatWarmupEstimatorCfg`(平地版,h_f/height loss 关)。
+- runner：`UnitreeGo2PIESTARTFlatWarmupPPORunnerCfg`、`UnitreeGo2PIESTARTStage2PPORunnerCfg`(都带 noise-cap 0.40)。
+- 任务：`Isaac-PIE-FullParkour-START-FlatWarmup-Unitree-Go2-v0`、`Isaac-PIE-FullParkour-START-Stage2-Unitree-Go2-v0`。
+
+**验证**：7 个文件 py_compile 通过；独立 smoke(legacy/refine-only/encoder-only/full-START 四档,z_m 都 64、
+loss 有限、梯度回流);`test_pie_estimator_loss` key-set 单测已更新并通过。其余 5 个单测失败是既有的
+45-vs-47 proprio 维度问题(HANDOFF 2026-06-04 已记),非本次引入。audit 脚本手算 forward 已改 START-aware。
+
+**下一步(未做)**：先从 START flat warmup 训走路(任务 START-FlatWarmup),再 resume 进 START-Stage2;
+~500-1000 轮做 audit,看 depth_shuffle→h_f/z_m 是否更强、重建 loss(rough/refined)是否在降、AdaSmpl prob
+是否随训练从高走低。当前服务器仍跑着 corridor-h_f run(未切 START)。
+
+## 2026-06-05 (part 2) · corridor-h_f model_7750 审计：proprio 捷径已破，depth 开始主导
+
+借鉴 START 论文(arXiv 2409.15692 "Walking with Terrain Reconstruction",PIE 同团队 ZJU;
+其 Appendix-C 消融证明:把 h_f 从 foot-clearance 改成"脚周围 0.1m 高度图"能把 Stepping
+Beams MEV 从 0.52 降到 0.14)。corridor h_f target 是这个思路的轻量版。
+
+对 `model_7750.pt`(iter 7750,terrain 3.4)审计,对比旧 foot-clearance target(model_53499):
+
+| 指标 | 旧 clearance(53499) | corridor(7750) | 解读 |
+|------|--------------------|----------------|------|
+| `depth_shuffle→h_f_hat` | 0.035 | **0.0426** | 略升 |
+| `proprio_shuffle→h_f_hat` | **0.565** | **0.0336** | **暴跌!捷径已破** |
+| `zero_h_f_hat`(actor依赖) | 0.053 | 0.059 | 基本没变 |
+| `h_f_hat mean_abs` | 0.36 | 0.090 | 信号变小(corridor 0=flat) |
+
+**核心成功**:`proprio_shuffle→h_f_hat` 从 0.565 暴跌到 0.034。旧版 h_f 几乎完全靠 proprio
+算(走捷径),现在打乱 proprio 几乎不动;而 depth 对 h_f 影响(0.043)**反超** proprio(0.034)。
+即 h_f 从"proprio 16x 碾压 depth"翻转成"depth 略占优"——**corridor target 达成了让 h_f 看
+视觉的核心目标**(正是 START Appendix-C 的方向)。
+
+**仍存在的不足**:
+- `depth_shuffle→h_f_hat` 绝对值仅 0.043,没大幅提升;h_f 整体信号偏平、偏弱(mean_abs 0.09)。
+- `zero_h_f_hat=0.059`,actor 还是不太用 h_f(远小于 zero_v_hat=0.38)。h_f 是辅助信号非主力
+  (论文里也如此)。
+- 斜坡(parkour) height_rmse 0.214 仍是全场最差(step h_f 0.042 不错,v_hat 健康[0.063,0.040,0.052])。
+
+**其他健康**:v_hat 没被拖坏、terrain 3.4 还在爬、noise 稳 0.27、clip_frac 全 0。
+
+### 下一步可借鉴 START 的两个机制(按性价比)
+1. **h_f 解码成"脚周围 0.1m 高度图"(Ĥᶠ)** 而非 4 维标量 demand——信息量更大,actor 会更愿意用。
+   论文 Table IV 证明这是 sparse foothold 命门。改动中等(要扩 h_f decoder 输出 + estimator target)。
+2. **AdaSmpl 自适应采样**——早期以 `p=tanh(CV(reward))` 概率把 GT 高度图直接喂 policy(而非网络
+   重建),学好了再切回重建。解决"早期重建噪声大→学不到地形→稀疏奖励拿不到"。能缓解从头训学不会。
+3. (已有)feet_edge reward 论文用双档距离 dist=[2.5,5.0]cm/权重[1.0,0.5],总权重 -1.0——核对本仓实现是否一致。
+
+### 当前训练状态
+- run `2026-06-05_15-15-07_3gpu_num1024_highcap_stage2_corridorhf_noisecap040_from_flat3500`
+  (tmux `stage2_corridorhf3`,GPU 0/1/2,日志 `/tmp/train_stage2_corridorhf_3gpu_num1024.log`)
+  iter 7800+,terrain 3.4,noise 0.27,episode_len 644,健康。
+- 审计工具/命令:`CUDA_VISIBLE_DEVICES=4 python scripts/audit_pie_estimator_pipeline.py
+  --task Isaac-PIE-FullParkour-HighCap-Stage2-NoiseCap-Unitree-Go2-v0 --num_envs 64 --headless
+  --checkpoint <abs_path> --summary_out /tmp/audit_corridorhf_7750.txt`。GPU 4/5/6 空闲。
+- 决策待定:先让训练继续观察 terrain 能否借更好的 h_f 突破旧瓶颈,还是上 #1(脚周围高度图)/#2(AdaSmpl)。
+
+## 2026-06-05 · 远端三卡启动 corridor-h_f Stage2 长训
+
+- 已将 START-lite corridor h_f target 改动同步到远端 `zjut-4090x8-wgy-frpc:/mnt/data1/wgy/projects/aaa`，同步文件：`HANDOFF.md`、`parkour_isaaclab/envs/mdp/observations.py`、`parkour_tasks/.../parkour_mdp_cfg.py`。远端同步前备份在 `/tmp/codex_backup_corridorhf_20260605_150221`。
+- 先尝试 4 卡长训。物理 GPU 3/7 被其它任务占用，尝试过 `CUDA_VISIBLE_DEVICES=0,1,2,4` 和 `4,5,6,0`，但 IsaacSim/PhysX 在非连续多卡映射下出现 `No suitable CUDA GPU was found` / GPU Foundation 初始化异常，进程卡在 distributed 参数同步，已清理失败会话。
+- 按用户要求改用 3 卡但保持 `--num_envs 1024`。当前训练会话：tmux `stage2_corridorhf3`，日志 `/tmp/train_stage2_corridorhf_3gpu_num1024.log`，物理 GPU `0,1,2`，命令核心：
+  `CUDA_VISIBLE_DEVICES=0,1,2 torchrun --nproc_per_node=3 scripts/rsl_rl/train.py --task Isaac-PIE-FullParkour-HighCap-Stage2-NoiseCap-Unitree-Go2-v0 --resume --load_run 2026-05-30_15-24-32_5gpu_highcap_flatwarmup_ori1_track15 --checkpoint model_3500.pt --reset_optimizer_on_resume --num_envs 1024 --max_iterations 50000 --headless --enable_cameras --distributed --run_name 3gpu_num1024_highcap_stage2_corridorhf_noisecap040_from_flat3500`。
+- 启动验证：环境已进入训练循环，`estimator_targets.foot_clearance` 为 `(4,)`，从 flatwarmup `model_3500.pt` 成功加载；已看到 `Learning iteration 3500/53500`、`3514/53500`。rank0 run 目录为 `logs/rsl_rl/unitree_go2_pie_parkour/2026-06-05_15-15-07_3gpu_num1024_highcap_stage2_corridorhf_noisecap040_from_flat3500`，另有 rank 参数目录 `2026-06-05_15-15-08_...`。约 3514 轮时 GPU 0/1/2 显存约 23.9GB、利用率 57-59%，ETA 约 8.5-9.5h。
+- 后续重点：到 `model_3750.pt` 或 `model_4000.pt` 先做一次 audit，不要只等长训结束。看 `depth_shuffle→h_f_hat` 是否显著高于旧 0.035、`proprio_shuffle→h_f_hat` 是否不再绝对支配、`zero_h_f_hat` action RMS 是否上升，同时确认 `v_hat_rmse` 和 terrain_level 没被新 h_f target 拖坏。
+
+## 2026-06-04 · START-lite h_f target：从当前脚 clearance 改为四腿地形走廊 demand
+
+- 背景：`model_53499` 审计显示 `depth_shuffle→h_f_hat≈0.035`、`proprio_shuffle→h_f_hat≈0.565`、`zero_h_f_hat≈0.053`，说明旧 `h_f_hat` 主要走 proprio/GRU shortcut，actor 也几乎不用它。旧 target 是 `pie_foot_clearance_target = foot_height - terrain_under_current_foot`，即当前脚下 clearance，关节角/速度/上一帧动作足够拟合，不会强迫视觉参与。
+- 修改：新增 `parkour_isaaclab/envs/mdp/observations.py::pie_foothold_terrain_target`。最初考虑四个固定小 patch，但用户指出 parkour/gap/jump 地形太复杂，因此默认实现改为四条 yaw-frame per-leg 地形走廊：每条腿在对应左右 lane 内看一段 x 范围，综合障碍最高点、gap/drop 最低点和高度起伏，输出 4 维非负 terrain demand。`0` 表示 nominal flat，`>0` 表示这条腿的前方/摆腿/落脚走廊存在台阶、障碍、坑沟或 sharp edge，需要更强地形处理。固定走廊避免重新绑定当前脚位置导致 proprio shortcut。
+- 当前参数：`foothold_offsets=((0.45,0.22),(0.45,-0.22),(-0.05,0.22),(-0.05,-0.22))` 只提供 lane center/fallback；`corridor_x_ranges=((0.15,1.00),(0.15,1.00),(-0.25,0.85),(-0.25,0.85))`；`lane_half_width=0.24`；`sample_radius=0.20` fallback；`nominal_base_height=0.30`；`reduction="corridor_demand"`；`gap_weight=0.60`；`roughness_weight=0.25`。这样前腿看前方落脚/障碍，后腿也能看到起跳/推进相关的前向走廊，而不是只看脚边一个圆。
+- 配置切换：`PieObservationsCfg.EstimatorTargetsCfg.foot_clearance` 仍保留 key 名 `foot_clearance`，但 func 从 `pie_foot_clearance_target` 改为 `pie_foothold_terrain_target`。这样 storage/loss/audit 和 checkpoint shape 都不变，`h_f_hat` 仍是 4 维，可继续从 `model_3500` resume。
+- 保留旧函数：`pie_foot_clearance_target` 未删除，`foot_scanner_fl/fr/rl/rr` 也未删除，避免影响现有 foot-clearance reward、诊断或其它任务。
+- 验证：`py_compile parkour_isaaclab/envs/mdp/observations.py parkour_tasks/.../parkour_mdp_cfg.py` 通过；`pie_estimator_targets_smoke.py --task Isaac-PIE-FullParkour-HighCap-Stage2-NoiseCap-Play-Unitree-Go2-v0 --headless --num_envs 2` 成功创建环境，ObservationManager 显示 `estimator_targets.foot_clearance` 为 `(4,)` 且 reset 阶段通过 shape/finite 检查。该 smoke 随后因脚本仍期望 `next_proprioception=(45,)` 而失败，但当前环境实际 policy/proprio history/next target 均为 47 维，这是既有测试脚本滞后问题，不是本次 h_f target 失败。
+- 额外验证限制：`pytest parkour_test/test_pie_estimator_loss.py parkour_test/test_pie_estimator_rollout_storage.py -q` 当前 5 fail/3 pass，失败同样来自测试构造 45 维 proprio，而当前代码 `build_pie_transition_targets(next_proprio_dim=47)` 和 `PIEEstimatorRolloutStorage(proprioception_history_shape=(10,47))` 已要求 47 维。
+- 下一步建议：不要直接长训。从 `model_3500` 短训 500-1000 iter 后立刻跑 `scripts/audit_pie_estimator_pipeline.py`，重点看 `depth_shuffle→h_f_hat` 是否明显上升、`proprio_shuffle→h_f_hat` 是否不再压倒性支配、`zero_h_f_hat` action RMS 是否上升，同时确认 `v_hat_rmse` 没被拖坏。若 h_f 开始看视觉但 actor 仍不用，再考虑轻量 `z_m`/estimator feature dropout。
+
 ## 2026-05-31 · Stage-2 真正根因 = PPO 探索失稳(noise 爆炸),已上 noise-std 上限修复
 
 ### 推翻之前的判断

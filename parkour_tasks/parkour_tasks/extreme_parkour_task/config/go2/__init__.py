@@ -394,6 +394,21 @@ gym.register(
     },
 )
 
+
+# PLAY-ONLY task: same HighCap NoiseCap network + Stage2 obstacle curriculum,
+# but relaxed termination cutoffs (min_height 0.12, roll/pitch 1.6 rad) so a
+# visual play session is not cut short by brief dynamic poses. Use this only
+# to watch a Stage2 checkpoint traverse obstacles; never train with it.
+gym.register(
+    id="Isaac-PIE-FullParkour-HighCap-Stage2-NoiseCap-Play-Unitree-Go2-v0",
+    entry_point="parkour_isaaclab.envs:ParkourManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.parkour_pie_cfg:UnitreeGo2PIEFullParkourFrontFastStage2PlayEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_pie_ppo_cfg:UnitreeGo2PIEFullParkourHighCapNoiseCapPPORunnerCfg",
+    },
+)
+
 # Terrain-adaptive (loss-only) variant: same FrontFast env, estimator uses
 # terrain_adaptive=2.0 but unchanged network shapes, so it can resume from a
 # FrontFast checkpoint (no architecture change).
@@ -474,5 +489,34 @@ gym.register(
     kwargs={
         "env_cfg_entry_point": f"{__name__}.parkour_pie_cfg:UnitreeGo2PIEParkourEnvCfg_EVAL",
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_pie_ppo_cfg:UnitreeGo2PIEParkourPPORunnerCfg",
+    },
+)
+
+# START architecture (arXiv 2409.15692) Stage 0: flat walking warmup. Same
+# FlatParkour env, runner adds heightmap refine + heightmap-encoded z_m +
+# AdaSmpl (terrain losses off on flat ground). Train from scratch first, then
+# resume into the START Stage-2 task.
+gym.register(
+    id="Isaac-PIE-FullParkour-START-FlatWarmup-Unitree-Go2-v0",
+    entry_point="parkour_isaaclab.envs:ParkourManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.parkour_pie_cfg:UnitreeGo2PIEFlatParkourWarmupEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_pie_ppo_cfg:UnitreeGo2PIESTARTFlatWarmupPPORunnerCfg",
+    },
+)
+
+# START Stage 2: full obstacle terrain with two-stage heightmap reconstruction
+# (rough MSE + U-Net-lite refine L1), heightmap-encoded z_m, AdaSmpl GT sampling,
+# and noise-cap 0.40. Resume from the START flat warmup checkpoint with
+# --reset_optimizer_on_resume. NOT compatible with HighCap checkpoints because
+# z_m now encodes the heightmap rather than being a free head.
+gym.register(
+    id="Isaac-PIE-FullParkour-START-Stage2-Unitree-Go2-v0",
+    entry_point="parkour_isaaclab.envs:ParkourManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.parkour_pie_cfg:UnitreeGo2PIEFullParkourFrontFastStage2EnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_pie_ppo_cfg:UnitreeGo2PIESTARTStage2PPORunnerCfg",
     },
 )

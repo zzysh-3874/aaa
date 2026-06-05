@@ -56,6 +56,47 @@ class DepthCNNEncoder(nn.Module):
         return self.encoder(depth)
 
 
+class HeightmapRefineDecoder(nn.Module):
+    """START-style two-stage heightmap refinement (rough -> refined).
+
+    The rough heightmap (already produced by the MLP ``height_decoder``) is
+    reshaped to a 2D grid and passed through a small conv encoder-decoder
+    (U-Net-lite with one skip connection) that cleans up edges and flat
+    surfaces. Following START (arXiv 2409.15692, sec. II-B), the rough map is
+    supervised with MSE and the refined map with L1; the refinement does not
+    add new information but sharpens edges that single-stage reconstruction
+    blurs.
+
+    Input/output are (B, H*W) flattened grids so the surrounding code keeps
+    treating the heightmap as a flat vector; reshaping to (B,1,H,W) happens
+    internally with the configured grid shape.
+    """
+
+    def __init__(self, grid_shape: tuple[int, int], hidden_channels: int = 16, activation: str = "elu"):
+        super().__init__()
+        self.grid_shape = grid_shape
+        c = hidden_channels
+        self.enc1 = nn.Sequential(nn.Conv2d(1, c, 3, padding=1), _activation(activation))
+        self.enc2 = nn.Sequential(nn.Conv2d(c, c * 2, 3, padding=1), _activation(activation))
+        # Decoder takes concat(enc2, enc1) as a single-level skip connection.
+        self.dec = nn.Sequential(
+            nn.Conv2d(c * 2 + c, c, 3, padding=1),
+            _activation(activation),
+            nn.Conv2d(c, 1, 3, padding=1),
+        )
+
+    def forward(self, rough_flat: torch.Tensor) -> torch.Tensor:
+        b = rough_flat.shape[0]
+        h, w = self.grid_shape
+        x = rough_flat.reshape(b, 1, h, w)
+        e1 = self.enc1(x)
+        e2 = self.enc2(e1)
+        # Residual refinement: predict a correction added to the rough map.
+        delta = self.dec(torch.cat((e2, e1), dim=1))
+        refined = x + delta
+        return refined.reshape(b, h * w)
+
+
 class PIEEstimator(nn.Module):
     """PIE estimator skeleton with CReF-style cross-modal attention and online-memory GRU.
 
@@ -88,6 +129,18 @@ class PIEEstimator(nn.Module):
         transformer_heads: int = 4,
         sample_latent_in_training: bool = False,
         height_decoder_hidden_dims: list[int] | tuple[int, ...] | None = None,
+        # START-style heightmap refinement (B). When enabled, the rough height
+        # map from ``height_decoder`` is refined by a conv U-Net-lite; both
+        # rough and refined maps are returned for dual (MSE + L1) supervision.
+        use_height_refine: bool = False,
+        height_grid_shape: tuple[int, int] = (12, 11),
+        height_refine_hidden_channels: int = 16,
+        # START-style AdaSmpl (A). When enabled, the estimator can encode a
+        # ground-truth heightmap (passed in at train time) into z_m instead of
+        # the depth-reconstructed one, with a schedule controlled externally.
+        # This only wires the *capability*; the sampling probability is applied
+        # by the training loop, which calls forward(..., gt_heightmap=...).
+        use_heightmap_encoder: bool = False,
         **kwargs,
     ):
         super().__init__()
@@ -141,6 +194,28 @@ class PIEEstimator(nn.Module):
         if height_decoder_hidden_dims is None:
             height_decoder_hidden_dims = [128]
         self.height_decoder = _mlp(z_m_dim, list(height_decoder_hidden_dims), height_dim, activation)
+
+        # --- START-style options (both opt-in; default off = current behaviour) ---
+        self.use_height_refine = bool(use_height_refine)
+        self.use_heightmap_encoder = bool(use_heightmap_encoder)
+        self.height_grid_shape = tuple(height_grid_shape)
+        self.height_dim = height_dim
+        if self.use_height_refine:
+            assert self.height_grid_shape[0] * self.height_grid_shape[1] == height_dim, (
+                f"height_grid_shape {self.height_grid_shape} does not match height_dim {height_dim}"
+            )
+            self.height_refine = HeightmapRefineDecoder(
+                self.height_grid_shape, height_refine_hidden_channels, activation
+            )
+        else:
+            self.height_refine = None
+        if self.use_heightmap_encoder:
+            # Encodes a heightmap grid (GT during AdaSmpl, else reconstructed)
+            # into the z_m terrain code that the actor consumes. This mirrors
+            # START's "policy takes the (reconstructed or GT) heightmap" design.
+            self.heightmap_encoder = _mlp(height_dim, [256, 128], z_m_dim, activation)
+        else:
+            self.heightmap_encoder = None
         # Remove z_m from next_proprio decoder inputs so the VAE latent z must carry
         # the residual information required to reconstruct next proprioception.
         # Keeping z_m in the decoder gave the model a shortcut that caused posterior
@@ -153,6 +228,8 @@ class PIEEstimator(nn.Module):
         depth: torch.Tensor | Mapping[str, torch.Tensor],
         proprioception_history: torch.Tensor | Mapping[str, torch.Tensor],
         hidden_state: torch.Tensor | None = None,
+        gt_heightmap: torch.Tensor | None = None,
+        adasmpl_prob: float = 0.0,
     ) -> dict[str, torch.Tensor]:
         depth = self._prepare_depth(depth)
         proprioception_history = self._prepare_proprioception_history(proprioception_history, depth.device)
@@ -168,11 +245,41 @@ class PIEEstimator(nn.Module):
 
         v_hat = self.v_head(y)
         h_f_hat = self.h_f_head(y)
-        z_m = self.z_m_head(y)
+        z_b = self.z_m_head(y)
         z_mu = self.z_mu_head(y)
         z_logvar = self.z_logvar_head(y)
         z = self._latent_sample(z_mu, z_logvar)
-        height_hat = self.height_decoder(z_m)
+
+        # --- Heightmap reconstruction (rough -> optional refine), START-style ---
+        height_rough = self.height_decoder(z_b)
+        if self.height_refine is not None:
+            height_refined = self.height_refine(height_rough)
+        else:
+            height_refined = height_rough
+
+        # --- Actor terrain code z_m ---
+        if self.heightmap_encoder is not None:
+            # START AdaSmpl: the actor consumes an ENCODING of the heightmap.
+            # During training, with probability adasmpl_prob, encode the
+            # ground-truth heightmap (clear features speed up learning); else
+            # encode the network's own refined reconstruction. At inference
+            # (adasmpl_prob=0 / no gt) it always encodes the reconstruction, so
+            # deployment uses only depth-derived terrain.
+            policy_heightmap = height_refined
+            if (
+                self.training
+                and gt_heightmap is not None
+                and adasmpl_prob > 0.0
+            ):
+                gt_heightmap = gt_heightmap.to(device=height_refined.device, dtype=height_refined.dtype)
+                # Per-sample Bernoulli mask so a fraction of the batch sees GT.
+                use_gt = (torch.rand(height_refined.shape[0], 1, device=height_refined.device) < adasmpl_prob)
+                policy_heightmap = torch.where(use_gt, gt_heightmap, height_refined)
+            z_m = self.heightmap_encoder(policy_heightmap)
+        else:
+            # Legacy behaviour: z_m is the free head output; height decoded from it.
+            z_m = z_b
+
         next_proprio_hat = self.next_proprio_decoder(torch.cat((z, v_hat, h_f_hat), dim=-1))
 
         return {
@@ -183,7 +290,8 @@ class PIEEstimator(nn.Module):
             "z_t": z,
             "z_mu": z_mu,
             "z_logvar": z_logvar,
-            "height_hat": height_hat,
+            "height_hat": height_refined,
+            "height_hat_rough": height_rough,
             "next_proprio_hat": next_proprio_hat,
             "rnn_hidden": next_hidden_state,
         }
@@ -194,8 +302,16 @@ class PIEEstimator(nn.Module):
         hidden_state: torch.Tensor | None = None,
         depth_key: str = "depth_camera",
         proprioception_history_key: str = "proprioception_history",
+        gt_heightmap: torch.Tensor | None = None,
+        adasmpl_prob: float = 0.0,
     ) -> dict[str, torch.Tensor]:
-        return self(obs_dict[depth_key], obs_dict[proprioception_history_key], hidden_state)
+        return self(
+            obs_dict[depth_key],
+            obs_dict[proprioception_history_key],
+            hidden_state,
+            gt_heightmap=gt_heightmap,
+            adasmpl_prob=adasmpl_prob,
+        )
 
     def initial_hidden(self, batch_size: int, device: torch.device | str | None = None) -> torch.Tensor:
         if device is None:

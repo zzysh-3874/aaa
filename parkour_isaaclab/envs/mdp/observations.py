@@ -28,6 +28,18 @@ if TYPE_CHECKING:
 PIE_ANG_VEL_SCALE = 0.25
 PIE_JOINT_VEL_SCALE = 0.05
 PIE_COMMAND_SCALE = (2.0, 2.0, 0.25)
+PIE_FOOTHOLD_TERRAIN_OFFSETS = (
+    (0.45, 0.22),
+    (0.45, -0.22),
+    (-0.05, 0.22),
+    (-0.05, -0.22),
+)
+PIE_FOOTHOLD_TERRAIN_CORRIDOR_X_RANGES = (
+    (0.15, 1.00),
+    (0.15, 1.00),
+    (-0.25, 0.85),
+    (-0.25, 0.85),
+)
 
 
 class ExtremeParkourObservations(ManagerTermBase):
@@ -238,6 +250,110 @@ def pie_foot_clearance_target(
         terrain_height = ray_sensor.data.ray_hits_w[:, 0, 2]
         clearances.append(foot_height - terrain_height)
     return torch.clip(torch.stack(clearances, dim=-1), -1.0, 1.0).to(env.device)
+
+
+def pie_foothold_terrain_target(
+    env: ParkourManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg = SceneEntityCfg("height_scanner"),
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    foothold_offsets: tuple[tuple[float, float], ...] = PIE_FOOTHOLD_TERRAIN_OFFSETS,
+    corridor_x_ranges: tuple[tuple[float, float], ...] = PIE_FOOTHOLD_TERRAIN_CORRIDOR_X_RANGES,
+    lane_half_width: float = 0.24,
+    sample_radius: float = 0.20,
+    nominal_base_height: float = 0.30,
+    reduction: str = "corridor_demand",
+    gap_weight: float = 0.60,
+    roughness_weight: float = 0.25,
+) -> torch.Tensor:
+    """Per-leg terrain demand sampled from fixed foothold corridors.
+
+    This is a START-lite target for the PIE ``h_f_hat`` head: instead of
+    regressing the current foot-to-ground clearance, it summarizes the
+    terrain along fixed leg-specific foothold/swing corridors in the robot
+    yaw frame. The fixed lanes avoid turning the target back into a current-foot
+    proprioception shortcut.
+
+    Output sign convention:
+        0.0  flat terrain at nominal body height
+        >0   stronger terrain demand: obstacle, gap/drop, or sharp edge
+    """
+    ray_sensor: RayCaster = env.scene.sensors[sensor_cfg.name]
+    asset: Articulation = env.scene[asset_cfg.name]
+
+    q = asset.data.root_quat_w
+    yaw = torch.atan2(
+        2.0 * (q[:, 0] * q[:, 3] + q[:, 1] * q[:, 2]),
+        1.0 - 2.0 * (q[:, 2] ** 2 + q[:, 3] ** 2),
+    )
+    cos_yaw = torch.cos(yaw).unsqueeze(1)
+    sin_yaw = torch.sin(yaw).unsqueeze(1)
+
+    ray_hits_w = ray_sensor.data.ray_hits_w
+    rel_xy_w = ray_hits_w[..., :2] - asset.data.root_pos_w[:, None, :2]
+    rel_x = rel_xy_w[..., 0]
+    rel_y = rel_xy_w[..., 1]
+    ray_x_b = cos_yaw * rel_x + sin_yaw * rel_y
+    ray_y_b = -sin_yaw * rel_x + cos_yaw * rel_y
+    ray_xy_b = torch.stack((ray_x_b, ray_y_b), dim=-1)
+
+    terrain_delta = ray_hits_w[..., 2] - asset.data.root_pos_w[:, 2].unsqueeze(1) + nominal_base_height
+    finite = torch.isfinite(ray_xy_b).all(dim=-1) & torch.isfinite(terrain_delta)
+    radius_sq = sample_radius * sample_radius
+    inf = torch.full_like(terrain_delta, float("inf"))
+    neg_inf = torch.full_like(terrain_delta, float("-inf"))
+    zeros = torch.zeros_like(terrain_delta[:, 0])
+
+    values = []
+    for leg_idx, offset_xy in enumerate(foothold_offsets):
+        offset = ray_xy_b.new_tensor(offset_xy)
+        dist_sq = torch.sum(torch.square(ray_xy_b - offset), dim=-1)
+        finite_dist = torch.where(finite, dist_sq, inf)
+        nearest_idx = torch.argmin(finite_dist, dim=1)
+        nearest = terrain_delta.gather(1, nearest_idx.unsqueeze(1)).squeeze(1)
+        fallback = torch.where(torch.isfinite(nearest), nearest, zeros)
+
+        patch_mask = finite & (dist_sq <= radius_sq)
+        if reduction == "corridor_demand":
+            x_min, x_max = corridor_x_ranges[min(leg_idx, len(corridor_x_ranges) - 1)]
+            lane_center_y = float(offset_xy[1])
+            corridor_mask = (
+                finite
+                & (ray_x_b >= x_min)
+                & (ray_x_b <= x_max)
+                & (torch.abs(ray_y_b - lane_center_y) <= lane_half_width)
+            )
+            demand_mask = corridor_mask | patch_mask
+            max_values = torch.where(demand_mask, terrain_delta, neg_inf)
+            min_values = torch.where(demand_mask, terrain_delta, inf)
+            max_height = torch.max(max_values, dim=1).values
+            min_height = torch.min(min_values, dim=1).values
+            has_samples = demand_mask.any(dim=1)
+
+            up_demand = torch.clamp_min(max_height, 0.0)
+            drop_demand = torch.clamp_min(-min_height, 0.0)
+            roughness_demand = torch.clamp_min(max_height - min_height, 0.0)
+            value = torch.maximum(
+                up_demand,
+                torch.maximum(gap_weight * drop_demand, roughness_weight * roughness_demand),
+            )
+            value = torch.where(has_samples, value, torch.clamp_min(fallback, 0.0))
+        elif reduction == "max":
+            patch_values = torch.where(patch_mask, terrain_delta, neg_inf)
+            reduced = torch.max(patch_values, dim=1).values
+            value = torch.where(patch_mask.any(dim=1), reduced, fallback)
+        elif reduction == "mean":
+            weights = torch.where(patch_mask, 1.0 / (dist_sq + 1.0e-4), torch.zeros_like(dist_sq))
+            safe_delta = torch.where(patch_mask, terrain_delta, torch.zeros_like(terrain_delta))
+            weight_sum = torch.sum(weights, dim=1)
+            reduced = torch.sum(weights * safe_delta, dim=1) / torch.clamp_min(weight_sum, 1.0e-6)
+            value = torch.where(weight_sum > 0.0, reduced, fallback)
+        elif reduction == "nearest":
+            value = fallback
+        else:
+            raise ValueError(f"Unsupported foothold terrain reduction: {reduction}")
+        values.append(value)
+
+    return torch.clip(torch.stack(values, dim=-1), -1.0, 1.0).to(env.device)
 
 
 def pie_critic_observation(

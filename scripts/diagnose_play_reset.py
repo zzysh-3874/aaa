@@ -59,6 +59,8 @@ def main():
 
     robot = env.unwrapped.scene["robot"]
     obs, extras = env.get_observations()
+    _term_params = env.unwrapped.termination_manager.get_term_cfg("total_terminates").params
+    print(f"=== effective termination params: {_term_params} ===")
     print("=== initial state (right after reset, before any action) ===")
     roll, pitch, _ = euler_xyz_from_quat(robot.data.root_state_w[:, 3:7])
     z = robot.data.root_state_w[:, 2]
@@ -83,6 +85,9 @@ def main():
         maxep = env.unwrapped.max_episode_length
         obs, _, dones, extras = env.step(actions)
         ep_len += 1
+        # Post-step z (after IsaacLab may have reset terminated envs, so for
+        # terminated envs this is the respawn z ~0.40; the pre-step z_b is the
+        # value that actually triggered the cutoff).
         done_idx = dones.nonzero(as_tuple=False).flatten()
         if done_idx.numel() > 0:
             for i in done_idx.tolist():
@@ -91,14 +96,14 @@ def main():
                 zz = z_b[i].item()
                 gi = int(gidx_b[i].item())
                 cause = []
-                if r > 0.7: cause.append(f"ROLL({r:.2f})")
-                if p > 0.7: cause.append(f"PITCH({p:.2f})")
-                if zz < 0.22: cause.append(f"HEIGHT({zz:.2f})")
-                if zz < -0.25: cause.append("FELL_OFF")
+                if r > 1.6: cause.append(f"ROLL({r:.2f})")
+                if p > 1.6: cause.append(f"PITCH({p:.2f})")
+                if zz < -0.25: cause.append(f"FELL_OFF(z={zz:.2f})")
+                elif zz < 0.12: cause.append(f"HEIGHT({zz:.2f})")
                 if gi >= num_goals: cause.append(f"REACH_GOAL(idx={gi}/{num_goals})")
                 if int(ep_len[i]) >= maxep: cause.append("TIMEOUT")
                 if not cause: cause.append(f"UNKNOWN(goal_idx={gi}/{num_goals})")
-                print(f"  env{i} reset @step{int(ep_len[i])}: {' '.join(cause)} (pre-step roll={r:.2f} pitch={p:.2f} z={zz:.2f})")
+                print(f"  env{i} reset @step{int(ep_len[i])}: {' '.join(cause)} (pre-step roll={r:.2f} pitch={p:.2f} z={zz:.2f} goal_idx={gi}/{num_goals})")
             ep_len[done_idx] = 0
         if step > 30 and (ep_len < 1).all():
             pass

@@ -156,14 +156,31 @@ class PieObservationsCfg:
             },
         )
         foot_clearance = ObsTerm(
-            func=observations.pie_foot_clearance_target,
+            # Keep the storage/loss key as ``foot_clearance`` for checkpoint
+            # compatibility, but supervise h_f_hat with a fixed per-leg
+            # foothold terrain summary instead of current foot clearance.
+            func=observations.pie_foothold_terrain_target,
             params={
-                "sensor_names": (
-                    "foot_scanner_fl",
-                    "foot_scanner_fr",
-                    "foot_scanner_rl",
-                    "foot_scanner_rr",
+                "sensor_cfg": SceneEntityCfg("height_scanner"),
+                "asset_cfg": SceneEntityCfg("robot"),
+                "foothold_offsets": (
+                    (0.45, 0.22),
+                    (0.45, -0.22),
+                    (-0.05, 0.22),
+                    (-0.05, -0.22),
                 ),
+                "corridor_x_ranges": (
+                    (0.15, 1.00),
+                    (0.15, 1.00),
+                    (-0.25, 0.85),
+                    (-0.25, 0.85),
+                ),
+                "lane_half_width": 0.24,
+                "sample_radius": 0.20,
+                "nominal_base_height": 0.30,
+                "reduction": "corridor_demand",
+                "gap_weight": 0.60,
+                "roughness_weight": 0.25,
             },
         )
         height_scan = ObsTerm(
@@ -1481,6 +1498,29 @@ class TerminationsCfg:
         time_out=True,
         params={
             "asset_cfg": SceneEntityCfg("robot"),
+        },
+    )
+
+
+@configclass
+class PlayRelaxedTerminationsCfg:
+    """PLAY-ONLY relaxed termination cutoffs baked into the DoneTerm params.
+
+    Used by the Stage-2 play env so a visual session is not cut short by the
+    low-crouch posture the policy adopts on obstacles (which hits the 0.20 m
+    training floor). The loose values are set directly here at class-body level
+    rather than mutated in __post_init__ (which proved unreliable through the
+    deep configclass inheritance chain). NEVER train with this.
+    """
+
+    total_terminates = DoneTerm(
+        func=terminations.terminate_episode,
+        time_out=True,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "max_roll": 1.6,
+            "max_pitch": 1.6,
+            "minimum_height": 0.10,
         },
     )
 

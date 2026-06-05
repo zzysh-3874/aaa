@@ -164,6 +164,17 @@ class PPOWithExtractor(PPO):
             "pie_num_learning_epochs", self.num_learning_epochs
         )
         self.pie_estimator_num_mini_batches = estimator_paras.get("pie_num_mini_batches", self.num_mini_batches)
+        # --- START AdaSmpl (A): adaptive ground-truth heightmap sampling ---
+        # When enabled, during the estimator update a fraction of samples encode
+        # the GROUND-TRUTH heightmap (clear features) instead of the network's
+        # reconstruction, easing early learning. The probability is set each
+        # iteration from the reward coefficient of variation: p = tanh(CV(R)),
+        # capped by ``pie_adasmpl_max_prob``. High CV (unstable early) -> more GT
+        # sampling; low CV (converged) -> ~0, so deployment uses pure
+        # reconstruction. Default off (prob stays 0) = backward compatible.
+        self.pie_use_adasmpl = bool(estimator_paras.get("pie_use_adasmpl", False))
+        self.pie_adasmpl_max_prob = float(estimator_paras.get("pie_adasmpl_max_prob", 0.8))
+        self.pie_adasmpl_prob = 0.0
         history_encoder = getattr(getattr(self.policy, "actor", None), "history_encoder", None)
         if history_encoder is not None:
             self.hist_encoder_optimizer = optim.Adam(history_encoder.parameters(), lr=learning_rate)
@@ -302,8 +313,45 @@ class PPOWithExtractor(PPO):
         self.reset_pie_actor_hidden()
         return {key: value / num_updates for key, value in mean_losses.items()}
 
+    def set_pie_adasmpl_prob_from_rewards(self, reward_buffer) -> float:
+        """Update AdaSmpl GT-sampling probability from reward coefficient of variation.
+
+        ``p = min(tanh(CV(R)), max_prob)`` where CV = std/|mean| over the recent
+        episode-reward buffer. Returns the new probability (0 when AdaSmpl off or
+        the buffer is too small / mean ~ 0). Called once per iteration by the
+        runner before the estimator update.
+        """
+        if not self.pie_use_adasmpl:
+            self.pie_adasmpl_prob = 0.0
+            return 0.0
+        try:
+            import statistics
+
+            vals = list(reward_buffer)
+            if len(vals) < 2:
+                self.pie_adasmpl_prob = 0.0
+                return 0.0
+            mean = statistics.mean(vals)
+            std = statistics.pstdev(vals)
+            if abs(mean) < 1e-6:
+                cv = 0.0
+            else:
+                cv = std / abs(mean)
+            import math
+
+            self.pie_adasmpl_prob = float(min(math.tanh(cv), self.pie_adasmpl_max_prob))
+        except Exception:
+            self.pie_adasmpl_prob = 0.0
+        return self.pie_adasmpl_prob
+
     def _compute_pie_estimator_flat_loss(self, depth_batch, proprioception_history_batch, targets_batch, dones_batch):
-        predictions = self.estimator(depth_batch, proprioception_history_batch)
+        gt_hm = targets_batch.get("height_scan") if self.pie_adasmpl_prob > 0.0 else None
+        predictions = self.estimator(
+            depth_batch,
+            proprioception_history_batch,
+            gt_heightmap=gt_hm,
+            adasmpl_prob=self.pie_adasmpl_prob,
+        )
         return self.pie_estimator_loss(predictions, targets_batch)
 
     def _compute_pie_estimator_sequence_loss(
@@ -316,12 +364,15 @@ class PPOWithExtractor(PPO):
         sequence_length = depth_sequence.shape[0]
         hidden_state = None
         loss_sums: dict[str, torch.Tensor] = {}
+        height_seq = targets_sequence.get("height_scan") if self.pie_adasmpl_prob > 0.0 else None
 
         for step_idx in range(sequence_length):
             predictions = self.estimator(
                 depth_sequence[step_idx],
                 proprioception_history_sequence[step_idx],
                 hidden_state=hidden_state,
+                gt_heightmap=(height_seq[step_idx] if height_seq is not None else None),
+                adasmpl_prob=self.pie_adasmpl_prob,
             )
             losses = self.pie_estimator_loss(
                 predictions,

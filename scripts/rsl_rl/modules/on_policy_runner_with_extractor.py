@@ -280,6 +280,12 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
                 if self.training_type == "rl":
                     self.alg.compute_returns(privileged_obs)
 
+            # START AdaSmpl: refresh the GT-heightmap sampling probability from
+            # the recent episode-reward variability before the estimator update.
+            # No-op unless the estimator runner enabled pie_use_adasmpl.
+            if hasattr(self.alg, "set_pie_adasmpl_prob_from_rewards"):
+                self.alg.set_pie_adasmpl_prob_from_rewards(rewbuffer)
+
             # update policy
             loss_dict = self.alg.update()
             if hist_encoding:

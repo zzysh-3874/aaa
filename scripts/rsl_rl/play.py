@@ -48,6 +48,27 @@ parser.add_argument(
     help="If set, add Gaussian action noise of this std during play (matches training exploration). "
     "Use to test whether a policy is noise-stabilised (collapses under deterministic play).",
 )
+parser.add_argument(
+    "--play_min_height",
+    type=float,
+    default=None,
+    help="PLAY-ONLY: override the terminate_episode minimum_height floor (e.g. 0.10) so a "
+    "low-crouch obstacle gait is not reset. Applied directly to the parsed env cfg, bypassing "
+    "the configclass __post_init__ chain.",
+)
+parser.add_argument(
+    "--play_max_tilt",
+    type=float,
+    default=None,
+    help="PLAY-ONLY: override both max_roll and max_pitch termination cutoffs (radians, e.g. 1.6).",
+)
+parser.add_argument(
+    "--play_init_level",
+    type=int,
+    default=None,
+    help="PLAY-ONLY: set max_init_terrain_level so robots spawn across rows 0..N (e.g. 6) on the "
+    "hard terrain the policy trained up to, instead of all starting at easy level 0.",
+)
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
 # append AppLauncher cli args
@@ -94,6 +115,22 @@ def main():
     env_cfg = parse_env_cfg(
         args_cli.task, device=args_cli.device, num_envs=args_cli.num_envs, use_fabric=not args_cli.disable_fabric
     )
+
+    # PLAY-ONLY termination / spawn overrides, applied directly to the parsed
+    # env cfg. This is the reliable place to set them: it runs after
+    # parse_env_cfg has fully constructed the cfg (including every
+    # __post_init__ in the inheritance chain), so the values cannot be
+    # clobbered by a parent class. NEVER use these for training.
+    if args_cli.play_min_height is not None:
+        env_cfg.terminations.total_terminates.params["minimum_height"] = args_cli.play_min_height
+        print(f"[PLAY] minimum_height -> {args_cli.play_min_height}")
+    if args_cli.play_max_tilt is not None:
+        env_cfg.terminations.total_terminates.params["max_roll"] = args_cli.play_max_tilt
+        env_cfg.terminations.total_terminates.params["max_pitch"] = args_cli.play_max_tilt
+        print(f"[PLAY] max_roll/max_pitch -> {args_cli.play_max_tilt}")
+    if args_cli.play_init_level is not None:
+        env_cfg.scene.terrain.max_init_terrain_level = args_cli.play_init_level
+        print(f"[PLAY] max_init_terrain_level -> {args_cli.play_init_level}")
     agent_cfg: ParkourRslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
 
     # Optionally turn on the depth-camera ObsTerm debug_vis (cv2.imshow grid).

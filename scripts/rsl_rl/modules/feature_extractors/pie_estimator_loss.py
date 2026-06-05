@@ -20,6 +20,15 @@ DEFAULT_PIE_ESTIMATOR_LOSS_WEIGHTS = {
     # contributes more gradient than flat ground. See
     # ``_terrain_difficulty_weight``. A value of 1.0 is a moderate emphasis.
     "terrain_adaptive": 0.0,
+    # START-style two-stage heightmap supervision (B). When the estimator
+    # produces a separate rough map (``height_hat_rough``), the rough map is
+    # supervised with MSE at this weight and the refined map (``height_hat``)
+    # with L1 (controlled by ``height_refined_l1`` below). 0.0 = rough loss off
+    # (only refined L1, or pure ``height`` MSE if no rough map). When the
+    # estimator has no refine stage, ``height_hat_rough`` is absent and these
+    # are ignored, preserving the original single ``height`` MSE term.
+    "height_rough": 0.0,
+    "height_refined_l1": 0.0,
 }
 
 # PIE proprioception is [ang_vel(3), gravity(3), command(3), joint_pos(12),
@@ -147,6 +156,20 @@ def compute_pie_estimator_loss(
     loss_v = F.mse_loss(predictions["v_hat"], v_target)
     loss_hf = _weighted_mse(predictions["h_f_hat"], h_f_target, terrain_weight)
     loss_height = _weighted_mse(predictions["height_hat"], height_target, terrain_weight)
+
+    # START-style dual heightmap supervision (B): if the estimator emitted a
+    # separate rough map, supervise rough with MSE and refined with L1. These
+    # are additive extra terms; the base ``height`` MSE on the refined map is
+    # kept for backward compatibility (set its weight to 0 to use only the
+    # rough+refined pair). When there is no rough map the terms are 0.
+    rough_pred = predictions.get("height_hat_rough")
+    if rough_pred is not None:
+        loss_height_rough = _weighted_mse(rough_pred, height_target, terrain_weight)
+        loss_height_refined_l1 = (predictions["height_hat"] - height_target).abs().mean()
+    else:
+        loss_height_rough = predictions["height_hat"].new_zeros(())
+        loss_height_refined_l1 = predictions["height_hat"].new_zeros(())
+
     loss_next_proprio = _masked_mse(
         predictions["next_proprio_hat"][..., :NEXT_PROPRIO_STATE_DIM],
         next_proprio_target[..., :NEXT_PROPRIO_STATE_DIM],
@@ -160,6 +183,8 @@ def compute_pie_estimator_loss(
         + loss_weights["height"] * loss_height
         + loss_weights["next_proprio"] * loss_next_proprio
         + loss_weights["kl"] * loss_kl
+        + loss_weights.get("height_rough", 0.0) * loss_height_rough
+        + loss_weights.get("height_refined_l1", 0.0) * loss_height_refined_l1
     )
 
     return {
@@ -167,6 +192,8 @@ def compute_pie_estimator_loss(
         "loss_v": loss_v,
         "loss_hf": loss_hf,
         "loss_height": loss_height,
+        "loss_height_rough": loss_height_rough,
+        "loss_height_refined_l1": loss_height_refined_l1,
         "loss_next_proprio": loss_next_proprio,
         "loss_kl": loss_kl,
     }
