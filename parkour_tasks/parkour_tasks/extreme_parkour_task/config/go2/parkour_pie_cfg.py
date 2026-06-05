@@ -865,6 +865,10 @@ class UnitreeGo2PIEFullParkourFrontFastStage2FootHmapEnvCfg(
             "grid_step": 0.10,
             "nominal_base_height": 0.30,
         }
+
+
+@configclass
+class UnitreeGo2PIEFullParkourEasyEnvCfg(UnitreeGo2PIEFullParkourStage2WarmEnvCfg):
     """Easy variant of Stage 2 warm-up: every obstacle starts at 5 cm.
 
     Layout, rewards, terminations and command stack are identical to
@@ -1050,6 +1054,11 @@ class UnitreeGo2PIEFlatParkourWarmupFootHmapEnvCfg(UnitreeGo2PIEFlatParkourWarmu
             "grid_step": 0.10,
             "nominal_base_height": 0.30,
         }
+
+
+@configclass
+class UnitreeGo2PIEParkourEnvCfg_StableEasyHeightBridge(UnitreeGo2PIEParkourEnvCfg_StableEasy):
+    """Bridge curriculum after Gentle warmup: faster commands and less height shaping."""
 
     commands: PIEBridgeCommandsCfg = PIEBridgeCommandsCfg()
     rewards: PIEBridgeRewardsCfg = PIEBridgeRewardsCfg()
