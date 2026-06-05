@@ -177,9 +177,10 @@ def main() -> None:
         raise RuntimeError("This diagnostic expects use_pie_actor_features=True")
 
     print_config(env, agent_cfg, runner)
+    _foot_dim = int(getattr(runner.alg.estimator, "foot_height_dim", 4) or 4)
     stats = EstimatorStats(
         v_sq=torch.zeros(3, device=env.device),
-        h_f_sq=torch.zeros(4, device=env.device),
+        h_f_sq=torch.zeros(_foot_dim, device=env.device),
         h_f_sq_by_terrain={},
         height_sq_by_terrain={},
         feature_abs_sum={key: 0.0 for key in runner.alg.pie_actor_feature_keys},
@@ -650,10 +651,15 @@ def print_summary(stats: EstimatorStats, runner: OnPolicyRunnerWithExtractor) ->
     v_rmse = torch.sqrt(stats.v_sq / denom)
     h_f_rmse = torch.sqrt(stats.h_f_sq / denom)
     emit(f"v_hat_rmse=[{', '.join(f'{x:.5f}' for x in v_rmse.detach().cpu().tolist())}]")
-    emit(
-        "h_f_hat_rmse="
-        + ", ".join(f"{name}:{value:.5f}" for name, value in zip(FOOT_NAMES, h_f_rmse.detach().cpu().tolist(), strict=True))
-    )
+    h_f_vals = h_f_rmse.detach().cpu().tolist()
+    if len(h_f_vals) == len(FOOT_NAMES):
+        emit(
+            "h_f_hat_rmse="
+            + ", ".join(f"{name}:{value:.5f}" for name, value in zip(FOOT_NAMES, h_f_vals, strict=True))
+        )
+    else:
+        # Per-foot heightmap (e.g. 36 dims): report a single mean RMSE.
+        emit(f"h_f_hat_rmse_mean={sum(h_f_vals) / max(len(h_f_vals), 1):.5f} (dim={len(h_f_vals)})")
     emit(f"height_hat_rmse={(stats.height_sq / denom) ** 0.5:.5f}")
     emit(f"next_proprio_hat_rmse={(stats.next_proprio_sq / next_denom) ** 0.5:.5f}")
 
