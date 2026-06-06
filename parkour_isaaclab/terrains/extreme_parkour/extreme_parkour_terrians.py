@@ -733,3 +733,178 @@ def gap_only_terrain(
         gap_intervals_m = np.zeros((0, 2), dtype=np.float32)
 
     return height_field_raw, goals * hs, goal_heights, gap_intervals_m
+
+
+@parkour_field_to_mesh
+def stepping_stones_terrain(
+    difficulty: float,
+    cfg: extreme_parkour_terrains_cfg.SteppingStonesTerrainCfg,
+    num_goals: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Stepping-stones field (梅花桩), START paper style.
+
+    A flat start platform, then a grid of square stones at z=0 separated by a
+    deep pit on all sides, then a landing platform. Higher difficulty -> smaller
+    stones and larger gaps. Goals follow the centre-line stones.
+    """
+    hs = cfg.horizontal_scale
+    vs = cfg.vertical_scale
+    width_pixels = int(cfg.size[0] / hs)
+    length_pixels = int(cfg.size[1] / hs)
+    mid_y = length_pixels // 2
+
+    stone_size_m = eval(cfg.stone_size, {"difficulty": difficulty})
+    stone_dist_m = eval(cfg.stone_distance, {"difficulty": difficulty})
+    height_var_m = eval(cfg.stone_height_var, {"difficulty": difficulty})
+
+    stone_p = max(1, int(round(stone_size_m / hs)))
+    dist_p = max(1, int(round(stone_dist_m / hs)))
+    pitch_p = stone_p + dist_p  # stone-to-stone spacing
+    height_var_q = int(round(height_var_m / vs))
+    pit_depth_q = -int(round(cfg.pit_depth / vs))
+
+    start_p = int(cfg.start_platform_len / hs)
+    landing_p = int(cfg.landing_platform_len / hs)
+
+    # Whole field starts as a deep pit; platforms and stones are raised to z=0.
+    height_field_raw = np.full((width_pixels, length_pixels), pit_depth_q, dtype=np.float32)
+
+    # Start platform at z=0 (full width).
+    height_field_raw[0:start_p, :] = 0
+
+    # Stone region spans from end of start platform to start of landing
+    # platform. Reserve the landing platform at the far end.
+    stone_x_start = start_p
+    stone_x_end = max(stone_x_start, width_pixels - landing_p)
+
+    # Lay a grid of stones. Track the x-centres of the stone columns for goal
+    # placement.
+    #
+    # y alignment: phase the stone rows so that ONE stone column is centred on
+    # mid_y. This guarantees the centre-line (where goals are placed) always
+    # lands on a stone, never in a gap between stones.
+    first_y = mid_y - stone_p // 2
+    while first_y - pitch_p + stone_p > 0:
+        first_y -= pitch_p  # back up to the lowest start that still overlaps
+    y_starts: list[int] = []
+    y = first_y
+    while y < length_pixels:
+        y_starts.append(y)
+        y += pitch_p
+
+    centre_stone_xs: list[int] = []
+    x = stone_x_start
+    while x < stone_x_end:
+        x_hi = min(x + stone_p, stone_x_end)
+        for ys in y_starts:
+            y_lo = max(0, ys)
+            y_hi = min(length_pixels, ys + stone_p)
+            if y_hi <= y_lo:
+                continue
+            h = 0
+            if height_var_q > 0:
+                h = np.random.randint(-height_var_q, height_var_q + 1)
+            height_field_raw[x:x_hi, y_lo:y_hi] = h
+        centre_stone_xs.append((x + x_hi) // 2)
+        x += pitch_p
+
+    # Landing platform at z=0.
+    height_field_raw[stone_x_end:, :] = 0
+
+    # Goals: first on the start platform edge, last on the landing platform,
+    # the rest spread over the centre-line stones. Because the stone grid is
+    # phase-aligned to mid_y, (centre_stone_x, mid_y) is always on a stone top.
+    goals = np.zeros((num_goals, 2), dtype=np.float32)
+    goal_heights = np.zeros((num_goals,), dtype=np.float32)
+
+    key_xs = [max(0, start_p - int(round(1.0 / hs)))]
+    if len(centre_stone_xs) > 0:
+        # Spread the middle goals across the stone field.
+        n_mid = max(1, num_goals - 2)
+        idx = np.linspace(0, len(centre_stone_xs) - 1, n_mid).astype(int)
+        key_xs += [centre_stone_xs[i] for i in idx]
+    key_xs.append(min(width_pixels - 1, stone_x_end + landing_p // 2))
+
+    if len(key_xs) > num_goals:
+        sel = np.linspace(0, len(key_xs) - 1, num_goals).astype(int)
+        key_xs = [key_xs[i] for i in sel]
+    elif len(key_xs) < num_goals:
+        key_xs += [key_xs[-1]] * (num_goals - len(key_xs))
+
+    for gi, gx in enumerate(key_xs):
+        gx = max(0, min(width_pixels - 1, gx))
+        goals[gi] = [gx, mid_y]
+        goal_heights[gi] = height_field_raw[gx, mid_y]
+
+    height_field_raw = padding_height_field_raw(height_field_raw, cfg)
+    return height_field_raw, goals * hs, goal_heights * vs
+
+
+@parkour_field_to_mesh
+def balance_beam_terrain(
+    difficulty: float,
+    cfg: extreme_parkour_terrains_cfg.BalanceBeamTerrainCfg,
+    num_goals: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Single straight balance beam (独木桥), START paper style.
+
+    A flat start platform, then a long narrow beam at z=0 on the centre line
+    with a deep pit on both y sides, then a landing platform. Higher difficulty
+    -> narrower beam. Goals follow the beam centre line.
+    """
+    hs = cfg.horizontal_scale
+    vs = cfg.vertical_scale
+    width_pixels = int(cfg.size[0] / hs)
+    length_pixels = int(cfg.size[1] / hs)
+    mid_y = length_pixels // 2
+
+    beam_w_m = eval(cfg.beam_width, {"difficulty": difficulty})
+    beam_half_w_p = max(1, int(round((beam_w_m / 2.0) / hs)))
+    pit_depth_q = -int(round(cfg.pit_depth / vs))
+
+    start_p = int(cfg.start_platform_len / hs)
+    landing_p = int(cfg.landing_platform_len / hs)
+    beam_len_p = int(cfg.beam_length / hs)
+
+    height_field_raw = np.zeros((width_pixels, length_pixels), dtype=np.float32)
+
+    # Start platform (full width) at z=0.
+    x = start_p
+
+    # Beam section: fill with pit, then carve the central strip back to z=0.
+    beam_x_start = x
+    beam_x_end = min(x + beam_len_p, width_pixels - landing_p)
+    beam_x_end = max(beam_x_start, beam_x_end)
+    height_field_raw[beam_x_start:beam_x_end, :] = pit_depth_q
+    y_lo = max(0, mid_y - beam_half_w_p)
+    y_hi = min(length_pixels, mid_y + beam_half_w_p)
+    height_field_raw[beam_x_start:beam_x_end, y_lo:y_hi] = 0
+    x = beam_x_end
+
+    # Landing platform (full width) at z=0.
+    height_field_raw[x:, :] = 0
+
+    # Goals: start edge, beam waypoints, landing.
+    goals = np.zeros((num_goals, 2), dtype=np.float32)
+    goal_heights = np.zeros((num_goals,), dtype=np.float32)
+
+    key_xs = [max(0, start_p - int(round(1.0 / hs)))]
+    n_mid = max(1, num_goals - 2)
+    for k in range(n_mid):
+        frac = (k + 0.5) / n_mid
+        key_xs.append(int(beam_x_start + frac * (beam_x_end - beam_x_start)))
+    key_xs.append(min(width_pixels - 1, x + landing_p // 2))
+
+    if len(key_xs) > num_goals:
+        sel = np.linspace(0, len(key_xs) - 1, num_goals).astype(int)
+        key_xs = [key_xs[i] for i in sel]
+    elif len(key_xs) < num_goals:
+        key_xs += [key_xs[-1]] * (num_goals - len(key_xs))
+
+    for gi, gx in enumerate(key_xs):
+        gx = max(0, min(width_pixels - 1, gx))
+        goals[gi] = [gx, mid_y]
+        goal_heights[gi] = height_field_raw[gx, mid_y]
+
+    height_field_raw = padding_height_field_raw(height_field_raw, cfg)
+    return height_field_raw, goals * hs, goal_heights * vs

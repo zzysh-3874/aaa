@@ -101,6 +101,66 @@ class StairsOnlyTerrainCfg(ExtremeParkourRoughTerrainCfg):
 
 
 @configclass
+class SteppingStonesTerrainCfg(ExtremeParkourRoughTerrainCfg):
+    """Stepping-stones field (梅花桩), START paper style.
+
+    Layout along +x:
+        [start_platform] -> [grid of square stones over a deep pit] ->
+        [landing_platform]
+
+    Stones are square tiles at z=0 separated by pits on all sides. Harder
+    difficulty -> smaller stones and wider gaps (sparser footholds). Goals
+    are placed on the centre-line stone rows so the standard ParkourEvent
+    waypoint logic still works.
+    """
+
+    function = extreme_parkour_terrians.stepping_stones_terrain
+    # Start / landing flat platforms (m).
+    start_platform_len: float = 2.0
+    landing_platform_len: float = 1.5
+    # Stone size along x and y (m). Shrinks with difficulty -> sparser.
+    # Peak (difficulty=1) eased: 0.55 -> 0.35 m stones (was 0.25 m, too small
+    # for a Go2 foot to land reliably and the body to balance).
+    stone_size: str = "0.55 - 0.20 * difficulty"
+    # Gap between adjacent stones (m). Grows with difficulty. Peak eased:
+    # 0.10 -> 0.20 m (was 0.25 m, which combined with tiny stones made the
+    # field nearly untraversable).
+    stone_distance: str = "0.10 + 0.10 * difficulty"
+    # Per-stone random height variation (±, m). START applies up to ±5 cm;
+    # eased to ±3 cm at peak so stone tops stay closer to level.
+    stone_height_var: str = "0.03 * difficulty"
+    # Pit depth below the stones (m); deep enough to terminate on contact.
+    pit_depth: float = 1.0
+
+
+@configclass
+class BalanceBeamTerrainCfg(ExtremeParkourRoughTerrainCfg):
+    """Single straight balance beam (独木桥), START paper style.
+
+    Layout along +x:
+        [start_platform] -> [long narrow beam over a deep pit] ->
+        [landing_platform]
+
+    The beam is a narrow strip at z=0 running along +x on the centre line,
+    with a pit on both y sides. Harder difficulty -> narrower beam. Goals
+    are placed along the beam centre-line.
+    """
+
+    function = extreme_parkour_terrians.balance_beam_terrain
+    start_platform_len: float = 2.0
+    landing_platform_len: float = 1.5
+    # Beam length along +x (m).
+    beam_length: float = 4.0
+    # Beam width (m). Narrower is harder. Start eased to 0.55 m (a wide, easy
+    # plank at difficulty=0) ramping down to 0.25 m at peak. (Was
+    # 0.40 - 0.15*d; the 0.40 m start was already a real beam with little
+    # warmup room.)
+    beam_width: str = "0.55 - 0.30 * difficulty"
+    # Pit depth on both sides of the beam (m).
+    pit_depth: float = 1.0
+
+
+@configclass
 class GapOnlyTerrainCfg(ExtremeParkourRoughTerrainCfg):
     """Straight corridor with random-width gaps between platforms.
 

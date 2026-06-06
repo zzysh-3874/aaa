@@ -4,5 +4,7 @@ ExtremeParkourGapTerrainCfg,
 ExtremeParkourHurdleTerrainCfg,
 ExtremeParkourStepTerrainCfg,
 ExtremeParkourTerrainCfg,
-ExtremeParkourDemoTerrainCfg
+ExtremeParkourDemoTerrainCfg,
+SteppingStonesTerrainCfg,
+BalanceBeamTerrainCfg,
 )

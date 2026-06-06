@@ -395,6 +395,42 @@ gym.register(
 )
 
 
+# START-aligned reward variant of the HighCap Stage2 NoiseCap task. Same
+# HighCap NoiseCap network (resumes the same flat-warmup / Stage2 checkpoints)
+# and same FrontFast curriculum, but: dof_error -0.04 -> -0.01, lin_vel_z and
+# orientation swapped to the START paper forms (-2.0 / -1.0, applied on ALL
+# terrain instead of being relaxed on obstacles), and the sloped-stone
+# ``parkour`` sub-terrain removed (its 0.2 share split across gap/hurdle/flat/
+# step). Use this to compare against the default Stage2 reward stack.
+gym.register(
+    id="Isaac-PIE-FullParkour-HighCap-Stage2-NoiseCap-STARTAligned-Unitree-Go2-v0",
+    entry_point="parkour_isaaclab.envs:ParkourManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.parkour_pie_cfg:UnitreeGo2PIEFullParkourFrontFastStage2STARTAlignedEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_pie_ppo_cfg:UnitreeGo2PIEFullParkourHighCapNoiseCapPPORunnerCfg",
+    },
+)
+
+
+# START-sparse variant: the START-aligned Stage2 task (START-form rewards +
+# sloped ``parkour`` sub-terrain removed) with the two START sparse-foothold
+# terrains ADDED to the same full-parkour tile mix: stepping_stones (梅花桩)
+# and balance_beam (独木桥). The six active obstacle terrains (gap / hurdle /
+# flat / step / stepping_stones / balance_beam) share proportion evenly. Same
+# HighCap NoiseCap network, so it resumes the same flat-warmup / Stage2
+# checkpoints.
+gym.register(
+    id="Isaac-PIE-FullParkour-HighCap-Stage2-NoiseCap-STARTSparse-Unitree-Go2-v0",
+    entry_point="parkour_isaaclab.envs:ParkourManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.parkour_pie_cfg:UnitreeGo2PIEFullParkourFrontFastStage2STARTSparseEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_pie_ppo_cfg:UnitreeGo2PIEFullParkourHighCapNoiseCapPPORunnerCfg",
+    },
+)
+
+
 # PLAY-ONLY task: same HighCap NoiseCap network + Stage2 obstacle curriculum,
 # but relaxed termination cutoffs (min_height 0.12, roll/pitch 1.6 rad) so a
 # visual play session is not cut short by brief dynamic poses. Use this only

@@ -659,6 +659,56 @@ class FlatStageOneStage2RewardsCfg(FlatStageOneRewardsCfg):
         },
     )
 
+
+@configclass
+class FlatStageOneStage2STARTAlignedRewardsCfg(FlatStageOneStage2RewardsCfg):
+    """Stage-2 reward with three terms re-aligned to the START paper (Table I,
+    arXiv 2512.13153) while keeping the rest of the Stage-2 stack unchanged.
+
+    Three changes vs ``FlatStageOneStage2RewardsCfg``:
+
+    1. ``reward_dof_error`` weight -0.04 -> -0.01 (START "Joint error"
+       ``Σ|q_j - q_j^default|^2`` weight). The Teacher default -0.04 was 4x
+       stronger than the paper; aligning it loosens the per-joint default-pose
+       pull so the paper's intended balance is restored.
+    2. ``reward_lin_vel_z`` swapped from the terrain-gated
+       ``reward_lin_vel_z`` (-0.5, halved on non-flat) to the paper form
+       ``reward_lin_vel_z_paper`` (``v_z^2``) at -2.0 on ALL terrain. START
+       penalises vertical bob uniformly.
+    3. ``reward_orientation`` swapped from the terrain-gated
+       ``reward_orientation`` (-0.5, zeroed on obstacles) to the paper form
+       ``reward_orientation_paper`` (``g_x^2 + g_y^2``) at -1.0 on ALL
+       terrain. START keeps a flat upright-posture penalty everywhere.
+
+    NOTE: changes 2 and 3 remove the obstacle-relaxation that let the policy
+    tilt / bob freely while traversing hurdles, steps and gaps. Combined with
+    removing the sloped ``parkour`` sub-terrain (see the matching env cfg),
+    this matches START's "no slope/jump tilt needed" assumption.
+    """
+
+    reward_dof_error = RewTerm(
+        func=rewards.reward_dof_error,
+        weight=-0.01,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+        },
+    )
+    reward_lin_vel_z = RewTerm(
+        func=rewards.reward_lin_vel_z_paper,
+        weight=-2.0,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+        },
+    )
+    reward_orientation = RewTerm(
+        func=rewards.reward_orientation_paper,
+        weight=-1.0,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+        },
+    )
+
+
 @configclass
 class PIERewardsCfg:
     """PIE Table I reward terms.

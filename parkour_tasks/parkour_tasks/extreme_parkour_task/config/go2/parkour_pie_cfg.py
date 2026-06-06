@@ -7,6 +7,10 @@ from isaaclab.envs.mdp import events as isaac_events
 from parkour_isaaclab.envs.mdp import parkour_commands
 from parkour_isaaclab.envs import ParkourManagerBasedRLEnvCfg
 from parkour_tasks.default_cfg import CAMERA_USD_CFG, VIEWER
+from parkour_isaaclab.terrains.extreme_parkour.extreme_parkour_terrains_cfg import (
+    SteppingStonesTerrainCfg,
+    BalanceBeamTerrainCfg,
+)
 
 from .parkour_mdp_cfg import (
     CommandsCfg,
@@ -33,6 +37,7 @@ from .parkour_mdp_cfg import (
     FlatStageOneRewardsCfg,
     FlatStageOneWarmupRewardsCfg,
     FlatStageOneStage2RewardsCfg,
+    FlatStageOneStage2STARTAlignedRewardsCfg,
     TerminationsCfg,
 )
 from .parkour_student_cfg import ParkourStudentSceneCfg
@@ -780,6 +785,123 @@ class UnitreeGo2PIEFullParkourFrontFastStage2EnvCfg(
     """
 
     rewards: FlatStageOneStage2RewardsCfg = FlatStageOneStage2RewardsCfg()
+
+
+@configclass
+class UnitreeGo2PIEFullParkourFrontFastStage2STARTAlignedEnvCfg(
+    UnitreeGo2PIEFullParkourFrontFastStage2EnvCfg
+):
+    """Stage-2 env with three rewards re-aligned to START (Table I) and the
+    sloped-stone ``parkour`` sub-terrain removed.
+
+    Differences vs ``UnitreeGo2PIEFullParkourFrontFastStage2EnvCfg``:
+
+    1. Reward: ``FlatStageOneStage2STARTAlignedRewardsCfg`` -
+       ``dof_error`` -0.04 -> -0.01, ``lin_vel_z`` -> paper form (-2.0, all
+       terrain), ``orientation`` -> paper form (-1.0, all terrain). See that
+       class for rationale.
+    2. Terrain: the sloped / tilted-stone ``parkour`` sub-terrain (the slope
+       + jump-down-tilted-stones type) is removed (proportion 0). Its 0.2
+       share is redistributed evenly across the remaining four obstacle types
+       (gap / hurdle / flat / step -> 0.25 each). START's terrain set has no
+       sloped-stone climb, and the paper-form orientation/lin_vel_z penalties
+       (which no longer relax on obstacles) would fight the body tilt that the
+       sloped-stone terrain requires - so it is dropped for consistency.
+
+    Everything else (FrontFast difficulty knee, NoiseCap-compatible network,
+    commands, terminations, no domain randomisation) is inherited unchanged,
+    so this env can resume the same flat-warmup / Stage-2 checkpoints.
+    """
+
+    rewards: FlatStageOneStage2STARTAlignedRewardsCfg = (
+        FlatStageOneStage2STARTAlignedRewardsCfg()
+    )
+
+    def __post_init__(self):
+        super().__post_init__()
+        gen = self.scene.terrain.terrain_generator
+        if gen is None:
+            return
+        # Remove the sloped-stone ``parkour`` sub-terrain and redistribute its
+        # proportion evenly across the remaining obstacle types. The terrain
+        # generator was already deep-copied by the FrontFast parent, so it is
+        # safe to mutate here without touching the shared singleton.
+        removed = gen.sub_terrains.get("parkour")
+        freed = removed.proportion if removed is not None else 0.0
+        if removed is not None:
+            removed.proportion = 0.0
+        # Redistribute to the four active obstacle terrains (parkour_demo
+        # stays at 0.0 as in the base mix).
+        active_keys = ["parkour_gap", "parkour_hurdle", "parkour_flat", "parkour_step"]
+        present = [k for k in active_keys if k in gen.sub_terrains]
+        if present and freed > 0.0:
+            share = freed / len(present)
+            for k in present:
+                gen.sub_terrains[k].proportion += share
+
+
+@configclass
+class UnitreeGo2PIEFullParkourFrontFastStage2STARTSparseEnvCfg(
+    UnitreeGo2PIEFullParkourFrontFastStage2STARTAlignedEnvCfg
+):
+    """START-aligned Stage-2 env with the two sparse-foothold terrains added.
+
+    Builds directly on ``...STARTAlignedEnvCfg`` (START-form rewards + sloped
+    ``parkour`` sub-terrain removed) and ADDS the two START sparse-foothold
+    archetypes as new sub-terrains in the same full-parkour tile mix:
+
+    - ``stepping_stones`` (梅花桩): square stones over a deep pit.
+    - ``balance_beam``    (独木桥): a single narrow beam over a deep pit.
+
+    Final mix (after slope removal + adding the two new types): the six active
+    obstacle terrains (gap / hurdle / flat / step / stepping_stones /
+    balance_beam) share the proportion mass evenly. ``parkour_demo`` stays 0.
+
+    NOTE on resolution: the full-parkour tile uses horizontal_scale = 0.08 m,
+    inherited by every sub-terrain. A 0.175 m beam discretises to ~2 cells,
+    which is workable but coarse; if precise foot placement on the narrowest
+    beam matters, train this on a finer-scale tile (e.g. the dedicated
+    START_SPARSE preset at hs = 0.04) instead.
+
+    Network / commands / terminations / no-domain-rand are all inherited, so
+    this resumes the same flat-warmup / Stage-2 checkpoints.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        gen = self.scene.terrain.terrain_generator
+        if gen is None:
+            return
+
+        # Inherit the tile's roughness / x-range conventions from an existing
+        # obstacle sub-terrain so the new ones blend in (apply_roughness,
+        # noise_range, pad widths come from the shared base class defaults).
+        gen.sub_terrains["stepping_stones"] = SteppingStonesTerrainCfg(
+            proportion=1.0,  # rebalanced below
+            apply_roughness=True,
+            noise_range=(0.0, 0.06),
+        )
+        gen.sub_terrains["balance_beam"] = BalanceBeamTerrainCfg(
+            proportion=1.0,  # rebalanced below
+            apply_roughness=True,
+            noise_range=(0.0, 0.06),
+        )
+
+        # Rebalance: every active obstacle terrain gets an equal share; the
+        # demo slot stays at 0.
+        active_keys = [
+            "parkour_gap",
+            "parkour_hurdle",
+            "parkour_flat",
+            "parkour_step",
+            "stepping_stones",
+            "balance_beam",
+        ]
+        present = [k for k in active_keys if k in gen.sub_terrains]
+        if present:
+            share = 1.0 / len(present)
+            for k in gen.sub_terrains:
+                gen.sub_terrains[k].proportion = share if k in present else 0.0
 
 
 @configclass
