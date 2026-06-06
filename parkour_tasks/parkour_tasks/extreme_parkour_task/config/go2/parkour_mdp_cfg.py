@@ -707,6 +707,16 @@ class FlatStageOneStage2STARTAlignedRewardsCfg(FlatStageOneStage2RewardsCfg):
             "asset_cfg": SceneEntityCfg("robot"),
         },
     )
+    # Remove the goal-reached sparse bonus (None disables the inherited term).
+    # It was added for the GapOnly experiment and is not part of START's reward
+    # set; forward drive is already provided densely by tracking_goal_vel +
+    # tracking_yaw, so dropping the sparse bonus brings the stack closer to
+    # START without stalling progress.
+    reward_goal_reached = None
+    # Remove the DreamWaQ foot-clearance swing-arc penalty (not in START's
+    # reward set). The per-foot heightmap target + feet_edge already shape
+    # foot placement; this term is redundant for the START-aligned stack.
+    reward_foot_clearance = None
 
 
 @configclass
