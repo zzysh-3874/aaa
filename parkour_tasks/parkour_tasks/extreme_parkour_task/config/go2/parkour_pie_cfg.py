@@ -904,6 +904,47 @@ class UnitreeGo2PIEFullParkourFrontFastStage2STARTSparseEnvCfg(
                 gen.sub_terrains[k].proportion = share if k in present else 0.0
 
 
+def _swap_to_foot_heightmap_target(env_cfg) -> None:
+    """Swap the estimator ``foot_clearance`` obs term to the 36-dim per-foot
+    heightmap target (START Ĥᶠ). Shared by the FootHmap env variants so the
+    storage/loss key stays ``foot_clearance`` but its width becomes 36, matching
+    the FootHmap estimator (foot_height_dim=36) and actor (num_actor_obs=182)."""
+    from parkour_isaaclab.envs.mdp import observations as _obs
+
+    foot_term = env_cfg.observations.estimator_targets.foot_clearance
+    foot_term.func = _obs.pie_foot_heightmap_target
+    foot_term.params = {
+        "sensor_cfg": SceneEntityCfg("height_scanner"),
+        "asset_cfg": SceneEntityCfg("robot"),
+        "foot_offsets": (
+            (0.45, 0.22),
+            (0.45, -0.22),
+            (-0.05, 0.22),
+            (-0.05, -0.22),
+        ),
+        "grid_shape": (3, 3),
+        "grid_step": 0.10,
+        "nominal_base_height": 0.30,
+    }
+
+
+@configclass
+class UnitreeGo2PIEFullParkourFrontFastStage2STARTSparseFootHmapEnvCfg(
+    UnitreeGo2PIEFullParkourFrontFastStage2STARTSparseEnvCfg
+):
+    """STARTSparse env (START-form rewards + slope removed + stones/beam added)
+    with the 36-dim per-foot heightmap estimator target.
+
+    Pair with ``UnitreeGo2PIESTARTFootHmapLowAdaStage2PPORunnerCfg`` (FootHmap
+    actor 182 + AdaSmpl ceiling 0.5). The foot target swap to 36 dims is applied
+    last so it overrides the inherited 4-dim corridor target.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        _swap_to_foot_heightmap_target(self)
+
+
 @configclass
 class UnitreeGo2PIEFullParkourFrontFastStage2PlayEnvCfg(
     UnitreeGo2PIEFullParkourFrontFastStage2EnvCfg

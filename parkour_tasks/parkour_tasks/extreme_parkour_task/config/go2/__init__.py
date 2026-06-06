@@ -581,3 +581,19 @@ gym.register(
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_pie_ppo_cfg:UnitreeGo2PIESTARTFootHmapStage2PPORunnerCfg",
     },
 )
+
+# START-sparse FootHmap variant: STARTSparse env (START-form rewards + slope
+# removed + stepping_stones/balance_beam added) with the 36-dim per-foot
+# heightmap estimator target, paired with the FootHmap actor (182) and a
+# LOWERED AdaSmpl ceiling (0.5) to fix the depth-blind z_m seen at ceiling 0.8.
+# This is the "full START alignment + sparse footholds + per-foot heightmap"
+# task. NOT compatible with corridor (150) checkpoints.
+gym.register(
+    id="Isaac-PIE-FullParkour-START-FootHmap-Sparse-Stage2-Unitree-Go2-v0",
+    entry_point="parkour_isaaclab.envs:ParkourManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.parkour_pie_cfg:UnitreeGo2PIEFullParkourFrontFastStage2STARTSparseFootHmapEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_pie_ppo_cfg:UnitreeGo2PIESTARTFootHmapLowAdaStage2PPORunnerCfg",
+    },
+)

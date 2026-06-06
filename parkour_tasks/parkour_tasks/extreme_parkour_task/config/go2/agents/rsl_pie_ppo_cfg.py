@@ -636,3 +636,55 @@ class UnitreeGo2PIESTARTFootHmapStage2PPORunnerCfg(UnitreeGo2PIESTARTStage2PPORu
 
     estimator = ParkourRslRlPIESTARTFootHmapEstimatorCfg()
     policy = ParkourRslRlPIESTARTFootHmapActorCriticCfg()
+
+
+# ---------------------------------------------------------------------------
+# START-aligned FootHmap estimator: per-foot 3x3 heightmap (36-dim) PLUS a
+# lower AdaSmpl ceiling to fix the "z_m blind to depth" problem.
+#
+# Audit of the FootHmap from-scratch run (model_17500) showed
+# depth_shuffle->z_m = 0.012 (z_m barely reacts to depth): because AdaSmpl fed
+# the GROUND-TRUTH heightmap up to 80% of the time early on, the heightmap
+# encoder learned to rely on clean GT input and stayed insensitive to the
+# noisier depth reconstruction. On sparse-foothold terrain (stepping stones /
+# balance beam) z_m MUST read terrain precisely, so this is critical. Fix:
+# lower pie_adasmpl_max_prob 0.8 -> 0.5 so at least half the batch always
+# encodes the reconstruction, forcing z_m to learn from depth from the start.
+# ---------------------------------------------------------------------------
+@configclass
+class ParkourRslRlPIESTARTFootHmapLowAdaEstimatorCfg(ParkourRslRlPIESTARTFootHmapEstimatorCfg):
+    """FootHmap estimator with AdaSmpl ceiling lowered to 0.5 (anti z_m-blind)."""
+
+    pie_adasmpl_max_prob: float = 0.5
+
+
+@configclass
+class ParkourRslRlPIESTARTFootHmapLowAdaFlatWarmupEstimatorCfg(
+    ParkourRslRlPIESTARTFootHmapFlatWarmupEstimatorCfg
+):
+    """Flat-warmup FootHmap estimator with AdaSmpl ceiling 0.5."""
+
+    pie_adasmpl_max_prob: float = 0.5
+
+
+@configclass
+class UnitreeGo2PIESTARTFootHmapLowAdaStage2PPORunnerCfg(UnitreeGo2PIESTARTFootHmapStage2PPORunnerCfg):
+    """START Stage-2 FootHmap runner with START-aligned reward env + AdaSmpl 0.5.
+
+    Uses the same FootHmap actor (182) but the estimator caps AdaSmpl at 0.5 so
+    z_m is forced to read the depth reconstruction (not just the GT heightmap),
+    fixing the depth-blind z_m observed in the 0.8-ceiling run. Pair this runner
+    with the STARTAligned / STARTSparse env (START-form rewards + slope removed),
+    whose 36-dim foot target matches foot_height_dim=36.
+    """
+
+    estimator = ParkourRslRlPIESTARTFootHmapLowAdaEstimatorCfg()
+
+
+@configclass
+class UnitreeGo2PIESTARTFootHmapLowAdaFlatWarmupPPORunnerCfg(
+    UnitreeGo2PIESTARTFootHmapFlatWarmupPPORunnerCfg
+):
+    """Flat-warmup FootHmap runner with AdaSmpl ceiling 0.5."""
+
+    estimator = ParkourRslRlPIESTARTFootHmapLowAdaFlatWarmupEstimatorCfg()
