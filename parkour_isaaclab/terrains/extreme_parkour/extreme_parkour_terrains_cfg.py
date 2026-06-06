@@ -119,15 +119,15 @@ class SteppingStonesTerrainCfg(ExtremeParkourRoughTerrainCfg):
     start_platform_len: float = 2.0
     landing_platform_len: float = 1.5
     # Stone size along x and y (m). Shrinks with difficulty -> sparser.
-    # Peak (difficulty=1) eased: 0.55 -> 0.35 m stones (was 0.25 m, too small
-    # for a Go2 foot to land reliably and the body to balance).
-    stone_size: str = "0.55 - 0.20 * difficulty"
-    # Gap between adjacent stones (m). Grows with difficulty. Peak eased:
-    # 0.10 -> 0.20 m (was 0.25 m, which combined with tiny stones made the
-    # field nearly untraversable).
-    stone_distance: str = "0.10 + 0.10 * difficulty"
-    # Per-stone random height variation (±, m). START applies up to ±5 cm;
-    # eased to ±3 cm at peak so stone tops stay closer to level.
+    # d=0 starts very large (0.80 m) so the field is almost continuous ground
+    # (easy enough to learn basic walking on), ramping down to 0.35 m at d=1.
+    stone_size: str = "0.80 - 0.45 * difficulty"
+    # Gap between adjacent stones (m). Grows with difficulty. d=0 starts at a
+    # tiny 0.04 m gap (stones nearly touching -> almost flat) ramping to 0.20 m
+    # at d=1, so the foothold sparsity is introduced gradually by the curriculum.
+    stone_distance: str = "0.04 + 0.16 * difficulty"
+    # Per-stone random height variation (±, m). Starts flat (0 at d=0) and
+    # ramps to ±3 cm at peak so stone tops stay level early on.
     stone_height_var: str = "0.03 * difficulty"
     # Pit depth below the stones (m); deep enough to terminate on contact.
     pit_depth: float = 1.0
@@ -151,11 +151,11 @@ class BalanceBeamTerrainCfg(ExtremeParkourRoughTerrainCfg):
     landing_platform_len: float = 1.5
     # Beam length along +x (m).
     beam_length: float = 4.0
-    # Beam width (m). Narrower is harder. Start eased to 0.55 m (a wide, easy
-    # plank at difficulty=0) ramping down to 0.25 m at peak. (Was
-    # 0.40 - 0.15*d; the 0.40 m start was already a real beam with little
-    # warmup room.)
-    beam_width: str = "0.55 - 0.30 * difficulty"
+    # Beam width (m). Narrower is harder. d=0 starts very wide (0.90 m, almost
+    # a full-width walkway -> easy to learn walking on) and ramps down to a
+    # genuinely narrow 0.25 m beam at d=1, so the balance challenge is
+    # introduced gradually by the terrain curriculum.
+    beam_width: str = "0.90 - 0.65 * difficulty"
     # Pit depth on both sides of the beam (m).
     pit_depth: float = 1.0
 
