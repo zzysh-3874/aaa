@@ -694,10 +694,13 @@ class FlatStageOneStage2STARTAlignedRewardsCfg(FlatStageOneStage2RewardsCfg):
         },
     )
     reward_lin_vel_z = RewTerm(
-        func=rewards.reward_lin_vel_z_paper,
+        func=rewards.reward_lin_vel_z_jump_aware,
         weight=-2.0,
         params={
             "asset_cfg": SceneEntityCfg("robot"),
+            "parkour_name": "base_parkour",
+            "jump_terrains": ("parkour_gap", "parkour_hurdle"),
+            "jump_scale": 0.5,
         },
     )
     reward_orientation = RewTerm(
