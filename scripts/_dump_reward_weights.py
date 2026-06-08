@@ -1,5 +1,5 @@
 import sys, yaml
-d = yaml.safe_load(open(sys.argv[1]))
+d = yaml.unsafe_load(open(sys.argv[1]))
 r = d["rewards"]
 for k, v in r.items():
     if isinstance(v, dict) and "weight" in v:
