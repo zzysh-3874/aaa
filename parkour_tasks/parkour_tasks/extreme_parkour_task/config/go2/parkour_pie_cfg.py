@@ -879,7 +879,14 @@ class UnitreeGo2PIEFullParkourFrontFastStage2STARTSparseEnvCfg(
         # ramp -- and each TerProg terrain's local-difficulty ramp after it
         # unlocks -- more gradual, giving the policy more intermediate levels
         # to adapt before terrains reach their hardest geometry.
+        #
+        # Drop num_cols 40 -> 27 at the same time so total tile count stays
+        # ~600 -> 405 (~ the original 10x40=400), keeping terrain-mesh GPU
+        # memory at the level that fit before (15x40=600 tiles OOM'd the 24 GB
+        # cards). 27 columns still give every terrain type several tiles per
+        # difficulty band.
         gen.num_rows = 15
+        gen.num_cols = 27
 
         # Inherit the tile's roughness / x-range conventions from an existing
         # obstacle sub-terrain so the new ones blend in (apply_roughness,
