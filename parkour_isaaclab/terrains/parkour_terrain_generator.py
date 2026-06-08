@@ -143,7 +143,29 @@ class ParkourTerrainGenerator(TerrainGenerator):
                 type_idx = row_col_type(sub_row, sub_col)
                 sub_terrains_cfg = sub_terrains_cfgs[type_idx]
                 sub_terrains_name = sub_terrains_names[type_idx]
-                mesh, origin, sub_terrain_goal, goal_heights, x_edge_mask, gap_intervals_m = self._get_terrain_mesh(difficulty, sub_terrains_cfg)
+
+                # TerProg local-difficulty remap: when a sub-terrain only
+                # appears from a non-zero level band, rescale its difficulty so
+                # that at its UNLOCK level it gets local difficulty 0 (its
+                # easiest geometry) and at the top level it reaches 1.0. Without
+                # this, a late-unlocked terrain (e.g. gaps from band start 0.6)
+                # would first appear already at difficulty 0.6 (a mid-hard gap),
+                # giving the policy no easy version to adapt to. With it, every
+                # terrain is introduced at its easiest and ramps up over the
+                # remaining levels. Terrains banded from 0.0 are unaffected.
+                gen_difficulty = difficulty
+                if terprog_bands is not None:
+                    band = terprog_bands.get(sub_terrains_name)
+                    if band is not None:
+                        b_lo, b_hi = band
+                        # current row position on the global [0,1] level axis
+                        row_frac = sub_row / max(self.cfg.num_rows - 1, 1)
+                        span = max(b_hi - b_lo, 1e-6)
+                        local = (row_frac - b_lo) / span
+                        local = float(np.clip(local, 0.0, 1.0))
+                        gen_difficulty = lower + (upper - lower) * local
+
+                mesh, origin, sub_terrain_goal, goal_heights, x_edge_mask, gap_intervals_m = self._get_terrain_mesh(gen_difficulty, sub_terrains_cfg)
                 # add to sub-terrains
                 self.terrain_type[sub_row, sub_col] = type_idx
                 self.terrain_names[sub_row, sub_col] = sub_terrains_name
