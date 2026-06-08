@@ -81,14 +81,54 @@ class ParkourTerrainGenerator(TerrainGenerator):
         proportions = np.array([sub_cfg.proportion for sub_cfg in self.cfg.sub_terrains.values()])
         proportions /= np.sum(proportions)
 
-        sub_indices = []
-        for index in range(self.cfg.num_cols):
-            sub_index = np.min(np.where(index / self.cfg.num_cols + 0.001 < np.cumsum(proportions))[0])
-            sub_indices.append(sub_index)
-        sub_indices = np.array(sub_indices, dtype=np.int32)
         # create a list of all terrain configs
         sub_terrains_cfgs = list(self.cfg.sub_terrains.values())
         sub_terrains_names = list(self.cfg.sub_terrains.keys())
+
+        terprog_bands = getattr(self.cfg, "terprog_bands", None)
+
+        if terprog_bands is None:
+            # original column-based type assignment (all types at every level)
+            sub_indices = []
+            for index in range(self.cfg.num_cols):
+                sub_index = np.min(np.where(index / self.cfg.num_cols + 0.001 < np.cumsum(proportions))[0])
+                sub_indices.append(sub_index)
+            sub_indices = np.array(sub_indices, dtype=np.int32)
+            def row_col_type(r, c):
+                return int(sub_indices[c])
+        else:
+            # START-style TerProg: the set of terrain types available depends on
+            # the row (difficulty level). A sub-terrain only appears in rows
+            # whose normalised difficulty row/(num_rows-1) lies in its band, so
+            # early levels hold only easy terrains and harder ones are added at
+            # higher levels. Columns within a row are split among the eligible
+            # types proportionally to their configured proportion.
+            base_prop = {name: float(cfg.proportion) for name, cfg in self.cfg.sub_terrains.items()}
+            per_row_col_type = np.zeros((self.cfg.num_rows, self.cfg.num_cols), dtype=np.int32)
+            for sub_row in range(self.cfg.num_rows):
+                row_frac = sub_row / max(self.cfg.num_rows - 1, 1)
+                eligible = []
+                for i, name in enumerate(sub_terrains_names):
+                    band = terprog_bands.get(name)
+                    if band is None:
+                        continue
+                    lo, hi = band
+                    if lo - 1e-6 <= row_frac <= hi + 1e-6 and base_prop.get(name, 0.0) > 0.0:
+                        eligible.append(i)
+                if len(eligible) == 0:
+                    eligible = [next(
+                        (i for i, n in enumerate(sub_terrains_names) if base_prop.get(n, 0.0) > 0.0),
+                        0,
+                    )]
+                elig_prop = np.array([base_prop[sub_terrains_names[i]] for i in eligible], dtype=np.float64)
+                elig_prop /= elig_prop.sum()
+                elig_cumsum = np.cumsum(elig_prop)
+                for sub_col in range(self.cfg.num_cols):
+                    k = int(np.min(np.where(sub_col / self.cfg.num_cols + 1e-6 < elig_cumsum)[0]))
+                    per_row_col_type[sub_row, sub_col] = eligible[k]
+            def row_col_type(r, c):
+                return int(per_row_col_type[r, c])
+
         # curriculum-based sub-terrains
         for sub_col in range(self.cfg.num_cols):
             for sub_row in range(self.cfg.num_rows):
@@ -100,11 +140,12 @@ class ParkourTerrainGenerator(TerrainGenerator):
 
                 difficulty = lower + (upper - lower) * difficulty
                 # generate terrain
-                sub_terrains_cfg = sub_terrains_cfgs[sub_indices[sub_col]]
-                sub_terrains_name = sub_terrains_names[sub_indices[sub_col]]
+                type_idx = row_col_type(sub_row, sub_col)
+                sub_terrains_cfg = sub_terrains_cfgs[type_idx]
+                sub_terrains_name = sub_terrains_names[type_idx]
                 mesh, origin, sub_terrain_goal, goal_heights, x_edge_mask, gap_intervals_m = self._get_terrain_mesh(difficulty, sub_terrains_cfg)
                 # add to sub-terrains
-                self.terrain_type[sub_row, sub_col] = sub_indices[sub_col]
+                self.terrain_type[sub_row, sub_col] = type_idx
                 self.terrain_names[sub_row, sub_col] = sub_terrains_name
                 self._add_sub_terrain(mesh, origin, sub_row, sub_col, sub_terrain_goal)
                 self.goal_heights[sub_row, sub_col, :] = goal_heights

@@ -903,6 +903,29 @@ class UnitreeGo2PIEFullParkourFrontFastStage2STARTSparseEnvCfg(
             for k in gen.sub_terrains:
                 gen.sub_terrains[k].proportion = share if k in present else 0.0
 
+        # START-style terrain progressive curriculum (TerProg): make the set of
+        # terrain TYPES available depend on the difficulty level (row). Early
+        # levels expose only the easy terrains so the policy can "acquire basic
+        # locomotion skills" (START II-D3) before facing risky sparse footholds;
+        # harder terrains are introduced only at higher levels. Bands are
+        # (start_frac, end_frac) over the normalised level axis row/(num_rows-1).
+        #   level 0.0-0.2 : flat + stepping_stones (big stones ~= near-flat)
+        #   level 0.3+    : add parkour_step
+        #   level 0.4+    : add balance_beam (still a wide walkway at low diff)
+        #   level 0.5+    : add parkour_hurdle
+        #   level 0.6+    : add parkour_gap
+        # parkour_flat and stepping_stones stay available across all levels so a
+        # promoted env always has an easy fallback row to learn the harder
+        # variants of those same types (smaller stones) at high difficulty.
+        gen.terprog_bands = {
+            "parkour_flat": (0.0, 1.0),
+            "stepping_stones": (0.0, 1.0),
+            "parkour_step": (0.3, 1.0),
+            "balance_beam": (0.4, 1.0),
+            "parkour_hurdle": (0.5, 1.0),
+            "parkour_gap": (0.6, 1.0),
+        }
+
 
 def _swap_to_foot_heightmap_target(env_cfg) -> None:
     """Swap the estimator ``foot_clearance`` obs term to the 36-dim per-foot
