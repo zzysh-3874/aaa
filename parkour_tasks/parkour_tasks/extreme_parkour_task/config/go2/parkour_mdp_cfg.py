@@ -720,6 +720,27 @@ class FlatStageOneStage2STARTAlignedRewardsCfg(FlatStageOneStage2RewardsCfg):
     # reward set). The per-foot heightmap target + feet_edge already shape
     # foot placement; this term is redundant for the START-aligned stack.
     reward_foot_clearance = None
+    # Swap the LINEAR goal-velocity tracking for START's dense EXPONENTIAL
+    # form (Table I lin-vel tracking, arXiv 2512.13153) along the goal
+    # direction. The linear version pays ~0 at low speed and is too weak to
+    # beat the regularizers once goal_reached is removed, so the policy learns
+    # that moving is net-negative and stalls (observed: how_far peaks ~1.8 m
+    # then decays as the policy minimises episode length to cut accumulated
+    # penalty). The exponential form pays close to its full +1.5 as soon as
+    # the robot reaches the commanded speed toward the goal, making forward
+    # motion clearly net-positive without re-introducing the sparse
+    # goal_reached bonus -- this is how START sustains locomotion. Keeps the
+    # goal-direction projection so the navigation signal (waypoints offset in
+    # y) is preserved, unlike START's pure body-frame command tracking.
+    reward_tracking_goal_vel = RewTerm(
+        func=rewards.reward_tracking_goal_vel_exp,
+        weight=1.5,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "parkour_name": "base_parkour",
+            "std": 0.25,
+        },
+    )
 
 
 @configclass

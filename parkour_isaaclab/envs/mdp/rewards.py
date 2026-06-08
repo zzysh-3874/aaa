@@ -653,6 +653,45 @@ def reward_tracking_goal_vel(
     rew_move = rew_move.clamp(min=0.0)
     return rew_move
 
+def reward_tracking_goal_vel_exp(
+    env: ParkourManagerBasedRLEnv,
+    parkour_name: str,
+    std: float = 0.25,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    ) -> torch.Tensor:
+    """START-style dense velocity-tracking reward, but along the goal direction.
+
+    Hybrid of the goal-based ``reward_tracking_goal_vel`` (keeps the navigation
+    signal: the robot is rewarded for moving toward the next parkour waypoint,
+    which may be offset in y) and the START paper's dense exponential form
+    (Table I, arXiv 2512.13153):
+
+        r = exp(-(min(proj_vel, v_cmd) - v_cmd)^2 / std)
+
+    where ``proj_vel`` is the robot's planar velocity projected onto the unit
+    vector pointing at the current goal, and ``v_cmd`` is the commanded forward
+    speed. ``min(proj_vel, v_cmd)`` removes the bonus for overshooting the
+    command. Unlike the linear ``reward_tracking_goal_vel`` (which gives ~0 at
+    low speed and is too weak to beat the regularizers, so the policy learns
+    that moving is net-negative and stalls), this exponential form pays close
+    to its full weight as soon as the robot reaches the commanded speed toward
+    the goal, making forward motion clearly net-positive even without a sparse
+    goal_reached bonus -- matching how START drives locomotion. std=0.25
+    follows the paper.
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    parkour_event: ParkourEvent = env.parkour_manager.get_term(parkour_name)
+    target_pos_rel = parkour_event.target_pos_rel
+    target_dir = target_pos_rel / (torch.norm(target_pos_rel, dim=-1, keepdim=True) + 1e-5)
+    cur_vel = asset.data.root_vel_w[:, :2]
+    proj_vel = torch.sum(target_dir * cur_vel, dim=-1)
+    command_vel = env.command_manager.get_command('base_velocity')[:, 0]
+    # Clamp the projected speed at the command so overshoot is not rewarded,
+    # then measure the (signed) shortfall from the command.
+    tracked = torch.minimum(proj_vel, command_vel)
+    error = tracked - command_vel
+    return torch.exp(-torch.square(error) / std)
+
 def reward_tracking_yaw(     
     env: ParkourManagerBasedRLEnv, 
     parkour_name : str, 
