@@ -873,6 +873,14 @@ class UnitreeGo2PIEFullParkourFrontFastStage2STARTSparseEnvCfg(
         if gen is None:
             return
 
+        # Finer difficulty granularity: 15 rows instead of 10 so each level
+        # step is a smaller geometry jump (difficulty = level/(num_rows-1), so
+        # 14 steps of ~0.071 vs 9 steps of ~0.111). This makes the curriculum
+        # ramp -- and each TerProg terrain's local-difficulty ramp after it
+        # unlocks -- more gradual, giving the policy more intermediate levels
+        # to adapt before terrains reach their hardest geometry.
+        gen.num_rows = 15
+
         # Inherit the tile's roughness / x-range conventions from an existing
         # obstacle sub-terrain so the new ones blend in (apply_roughness,
         # noise_range, pad widths come from the shared base class defaults).
