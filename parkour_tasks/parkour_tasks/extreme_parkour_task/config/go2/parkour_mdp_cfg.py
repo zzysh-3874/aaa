@@ -710,12 +710,24 @@ class FlatStageOneStage2STARTAlignedRewardsCfg(FlatStageOneStage2RewardsCfg):
             "asset_cfg": SceneEntityCfg("robot"),
         },
     )
-    # Remove the goal-reached sparse bonus (None disables the inherited term).
-    # It was added for the GapOnly experiment and is not part of START's reward
-    # set; forward drive is already provided densely by tracking_goal_vel +
-    # tracking_yaw, so dropping the sparse bonus brings the stack closer to
-    # START without stalling progress.
-    reward_goal_reached = None
+    # Re-enable the goal-reached sparse bonus. It was dropped to match START's
+    # reward set, but START's terrains are all straight (pure forward velocity
+    # command, no goal direction), so it has no "stand still facing the goal"
+    # exploit. THIS task is goal-based with waypoints offset in y, so every
+    # dense forward reward (tracking_goal_vel, tracking_yaw) can be farmed by a
+    # slow-shuffle / in-place gait that minimises the ang_vel_xy + dof_acc
+    # penalties: observed mean_reward CLIMBING while how_far DECAYED (1.83 ->
+    # 0.97) as the policy converged on a high-reward stationary pose. goal_reached
+    # is the only reward that cannot be farmed without actually crossing a
+    # waypoint, so it is the anti-loafing anchor that the June-5 from-scratch
+    # run (which reached terrain 5.38) relied on. Weight 1.0 matches that run.
+    reward_goal_reached = RewTerm(
+        func=rewards.reward_goal_reached,
+        weight=1.0,
+        params={
+            "parkour_name": "base_parkour",
+        },
+    )
     # Remove the DreamWaQ foot-clearance swing-arc penalty (not in START's
     # reward set). The per-foot heightmap target + feet_edge already shape
     # foot placement; this term is redundant for the START-aligned stack.
