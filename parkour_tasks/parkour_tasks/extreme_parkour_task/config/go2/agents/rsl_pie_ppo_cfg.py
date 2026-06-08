@@ -653,9 +653,17 @@ class UnitreeGo2PIESTARTFootHmapStage2PPORunnerCfg(UnitreeGo2PIESTARTStage2PPORu
 # ---------------------------------------------------------------------------
 @configclass
 class ParkourRslRlPIESTARTFootHmapLowAdaEstimatorCfg(ParkourRslRlPIESTARTFootHmapEstimatorCfg):
-    """FootHmap estimator with AdaSmpl ceiling lowered to 0.5 (anti z_m-blind)."""
+    """FootHmap estimator with AdaSmpl ceiling at 0.65.
 
-    pie_adasmpl_max_prob: float = 0.5
+    History: started at 0.8 (START paper value), dropped to 0.5 after a
+    ``depth_shuffle->z_m`` audit suggested z_m was depth-blind (relying on the
+    GT heightmap fed by AdaSmpl). 0.5 starved early exploration too much on the
+    sparse-foothold from-scratch run, so this is a middle ground (0.65): enough
+    GT heightmap sampling to ease early sparse-reward exploration (START's
+    intent) while still forcing ~35%+ of the batch through the depth
+    reconstruction so z_m stays sensitive to depth."""
+
+    pie_adasmpl_max_prob: float = 0.65
 
 
 @configclass
