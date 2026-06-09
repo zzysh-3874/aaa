@@ -741,11 +741,28 @@ def stepping_stones_terrain(
     cfg: extreme_parkour_terrains_cfg.SteppingStonesTerrainCfg,
     num_goals: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Stepping-stones field (梅花桩), START paper style.
+    """Stepping-stones field (梅花桩), simplified "path with occasional gaps".
 
-    A flat start platform, then a grid of square stones at z=0 separated by a
-    deep pit on all sides, then a landing platform. Higher difficulty -> smaller
-    stones and larger gaps. Goals follow the centre-line stones.
+    Layout (top-down, robot walks +x):
+
+        [start platform] ███ gap ████████ gap ██████ gap ███ [landing]
+
+    The walkway is FULL WIDTH in y (a continuous road), and gaps are full-width
+    trenches cut across it at intervals. So the robot only has to decide
+    "is there a gap ahead, do I step/jump over it" -- it does NOT have to pick
+    left/right footholds. Difficulty controls three things:
+
+    * Gap frequency: how many stone segments occur between consecutive gaps.
+      Low difficulty -> ~5 segments per gap (gaps are rare, mostly continuous
+      ground); high difficulty -> ~2-3 segments per gap (gaps frequent).
+    * Stone (segment) length along x: large early, smaller later.
+    * Gap width: stays crossable, grows slightly with difficulty.
+
+    ``cfg`` fields reused:
+      stone_size      -> segment length along x (string in 'difficulty')
+      stone_distance  -> gap width (string in 'difficulty')
+      stone_height_var-> per-segment random height (string)
+      pit_depth       -> trench depth
     """
     hs = cfg.horizontal_scale
     vs = cfg.vertical_scale
@@ -753,76 +770,67 @@ def stepping_stones_terrain(
     length_pixels = int(cfg.size[1] / hs)
     mid_y = length_pixels // 2
 
-    stone_size_m = eval(cfg.stone_size, {"difficulty": difficulty})
-    stone_dist_m = eval(cfg.stone_distance, {"difficulty": difficulty})
+    seg_len_m = eval(cfg.stone_size, {"difficulty": difficulty})
+    gap_w_m = eval(cfg.stone_distance, {"difficulty": difficulty})
     height_var_m = eval(cfg.stone_height_var, {"difficulty": difficulty})
 
-    stone_p = max(1, int(round(stone_size_m / hs)))
-    dist_p = max(1, int(round(stone_dist_m / hs)))
-    pitch_p = stone_p + dist_p  # stone-to-stone spacing
+    seg_p = max(1, int(round(seg_len_m / hs)))
+    gap_p = max(1, int(round(gap_w_m / hs)))
     height_var_q = int(round(height_var_m / vs))
     pit_depth_q = -int(round(cfg.pit_depth / vs))
 
     start_p = int(cfg.start_platform_len / hs)
     landing_p = int(cfg.landing_platform_len / hs)
 
-    # Whole field starts as a deep pit; platforms and stones are raised to z=0.
-    height_field_raw = np.full((width_pixels, length_pixels), pit_depth_q, dtype=np.float32)
+    # Number of continuous segments between consecutive gaps. Early: ~5 (gaps
+    # rare); late: ~2.5 (gaps frequent). Linear in difficulty.
+    segs_per_gap = 5.0 - 2.5 * difficulty  # 5.0 at d=0 -> 2.5 at d=1
 
-    # Start platform at z=0 (full width).
-    height_field_raw[0:start_p, :] = 0
+    # Whole field flat at z=0; we only carve trenches (gaps) into it.
+    height_field_raw = np.zeros((width_pixels, length_pixels), dtype=np.float32)
 
-    # Stone region spans from end of start platform to start of landing
-    # platform. Reserve the landing platform at the far end.
     stone_x_start = start_p
     stone_x_end = max(stone_x_start, width_pixels - landing_p)
 
-    # Lay a grid of stones. Track the x-centres of the stone columns for goal
-    # placement.
-    #
-    # y alignment: phase the stone rows so that ONE stone column is centred on
-    # mid_y. This guarantees the centre-line (where goals are placed) always
-    # lands on a stone, never in a gap between stones.
-    first_y = mid_y - stone_p // 2
-    while first_y - pitch_p + stone_p > 0:
-        first_y -= pitch_p  # back up to the lowest start that still overlaps
-    y_starts: list[int] = []
-    y = first_y
-    while y < length_pixels:
-        y_starts.append(y)
-        y += pitch_p
-
-    centre_stone_xs: list[int] = []
+    # Walk along x laying continuous ground, inserting a full-width trench
+    # after roughly every ``segs_per_gap`` segments. We accumulate a counter
+    # and drop a gap when it crosses an integer multiple, so the average gap
+    # spacing matches segs_per_gap segments.
     x = stone_x_start
+    seg_count = 0.0
+    # Optional small per-segment height variation: apply to the whole current
+    # segment block so the road is piecewise level (not noisy within a step).
     while x < stone_x_end:
-        x_hi = min(x + stone_p, stone_x_end)
-        for ys in y_starts:
-            y_lo = max(0, ys)
-            y_hi = min(length_pixels, ys + stone_p)
-            if y_hi <= y_lo:
-                continue
-            h = 0
-            if height_var_q > 0:
-                h = np.random.randint(-height_var_q, height_var_q + 1)
-            height_field_raw[x:x_hi, y_lo:y_hi] = h
-        centre_stone_xs.append((x + x_hi) // 2)
-        x += pitch_p
+        # lay one segment of continuous ground (height optionally varied)
+        x_hi = min(x + seg_p, stone_x_end)
+        if height_var_q > 0:
+            h = np.random.randint(-height_var_q, height_var_q + 1)
+            height_field_raw[x:x_hi, :] = h
+        # else already 0
+        x = x_hi
+        seg_count += 1.0
 
-    # Landing platform at z=0.
+        # after enough segments, carve a full-width trench (gap)
+        if seg_count >= segs_per_gap and x + gap_p < stone_x_end:
+            height_field_raw[x:x + gap_p, :] = pit_depth_q
+            x += gap_p
+            seg_count = 0.0
+
+    # Landing platform at z=0 (already 0, but ensure no trailing trench).
     height_field_raw[stone_x_end:, :] = 0
 
-    # Goals: first on the start platform edge, last on the landing platform,
-    # the rest spread over the centre-line stones. Because the stone grid is
-    # phase-aligned to mid_y, (centre_stone_x, mid_y) is always on a stone top.
+    # Goals along the centre line, evenly spread; since the road is full-width
+    # and gaps are thin trenches, centre-line goals are always reachable.
     goals = np.zeros((num_goals, 2), dtype=np.float32)
     goal_heights = np.zeros((num_goals,), dtype=np.float32)
 
     key_xs = [max(0, start_p - int(round(1.0 / hs)))]
-    if len(centre_stone_xs) > 0:
-        # Spread the middle goals across the stone field.
-        n_mid = max(1, num_goals - 2)
-        idx = np.linspace(0, len(centre_stone_xs) - 1, n_mid).astype(int)
-        key_xs += [centre_stone_xs[i] for i in idx]
+    n_mid = max(1, num_goals - 2)
+    span_lo = start_p
+    span_hi = stone_x_end
+    for k in range(n_mid):
+        frac = (k + 0.5) / n_mid
+        key_xs.append(int(span_lo + frac * (span_hi - span_lo)))
     key_xs.append(min(width_pixels - 1, stone_x_end + landing_p // 2))
 
     if len(key_xs) > num_goals:

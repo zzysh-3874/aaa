@@ -118,18 +118,19 @@ class SteppingStonesTerrainCfg(ExtremeParkourRoughTerrainCfg):
     # Start / landing flat platforms (m).
     start_platform_len: float = 2.0
     landing_platform_len: float = 1.5
-    # Stone size along x and y (m). Shrinks with difficulty -> sparser.
-    # d=0 starts very large (0.80 m) so the field is almost continuous ground
-    # (easy enough to learn basic walking on), ramping down to 0.35 m at d=1.
-    stone_size: str = "0.80 - 0.45 * difficulty"
-    # Gap between adjacent stones (m). Grows with difficulty. d=0 starts at a
-    # tiny 0.04 m gap (stones nearly touching -> almost flat) ramping to 0.20 m
-    # at d=1, so the foothold sparsity is introduced gradually by the curriculum.
-    stone_distance: str = "0.04 + 0.16 * difficulty"
-    # Per-stone random height variation (±, m). Starts flat (0 at d=0) and
-    # ramps to ±3 cm at peak so stone tops stay level early on.
+    # Segment length along x (length of each continuous ground piece between
+    # gaps), in m. Large early (easy: long stretches of ground) shrinking with
+    # difficulty (shorter pieces -> the robot crosses gaps more often relative
+    # to its stride). d=0 -> 0.60 m, d=1 -> 0.30 m.
+    stone_size: str = "0.60 - 0.30 * difficulty"
+    # Gap (trench) width across the path, in m. Crossable throughout; grows a
+    # little with difficulty. d=0 -> 0.12 m (easy step-over), d=1 -> 0.30 m.
+    stone_distance: str = "0.12 + 0.18 * difficulty"
+    # Per-segment random height variation (±, m). Starts flat (0 at d=0) and
+    # ramps to ±3 cm at peak so segment tops stay level early on.
     stone_height_var: str = "0.03 * difficulty"
-    # Pit depth below the stones (m); deep enough to terminate on contact.
+    # Pit (trench) depth below the path (m); deep enough to terminate on a
+    # mis-step into a gap.
     pit_depth: float = 1.0
 
 
