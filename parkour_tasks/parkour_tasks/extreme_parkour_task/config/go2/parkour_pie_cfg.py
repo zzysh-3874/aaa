@@ -891,11 +891,12 @@ class UnitreeGo2PIEFullParkourFrontFastStage2STARTSparseEnvCfg(
         # Inherit the tile's roughness / x-range conventions from an existing
         # obstacle sub-terrain so the new ones blend in (apply_roughness,
         # noise_range, pad widths come from the shared base class defaults).
-        gen.sub_terrains["stepping_stones"] = SteppingStonesTerrainCfg(
-            proportion=1.0,  # rebalanced below
-            apply_roughness=True,
-            noise_range=(0.0, 0.06),
-        )
+        #
+        # NOTE: stepping_stones (梅花桩) was REMOVED -- it stalled the curriculum
+        # at terrain level ~3.2 (the policy would not commit to crossing the
+        # trench segments and stopped at ~3 m, below the move_up distance), so
+        # the foothold-field type is dropped for now. balance_beam (独木桥) is
+        # kept.
         gen.sub_terrains["balance_beam"] = BalanceBeamTerrainCfg(
             proportion=1.0,  # rebalanced below
             apply_roughness=True,
@@ -909,7 +910,6 @@ class UnitreeGo2PIEFullParkourFrontFastStage2STARTSparseEnvCfg(
             "parkour_hurdle",
             "parkour_flat",
             "parkour_step",
-            "stepping_stones",
             "balance_beam",
         ]
         present = [k for k in active_keys if k in gen.sub_terrains]
@@ -921,20 +921,17 @@ class UnitreeGo2PIEFullParkourFrontFastStage2STARTSparseEnvCfg(
         # START-style terrain progressive curriculum (TerProg): make the set of
         # terrain TYPES available depend on the difficulty level (row). Early
         # levels expose only the easy terrains so the policy can "acquire basic
-        # locomotion skills" (START II-D3) before facing risky sparse footholds;
+        # locomotion skills" (START II-D3) before facing risky terrains;
         # harder terrains are introduced only at higher levels. Bands are
         # (start_frac, end_frac) over the normalised level axis row/(num_rows-1).
-        #   level 0.0-0.2 : flat + stepping_stones (big stones ~= near-flat)
+        #   level 0.0-0.3 : flat only (learn to walk)
         #   level 0.3+    : add parkour_step
         #   level 0.4+    : add balance_beam (still a wide walkway at low diff)
         #   level 0.5+    : add parkour_hurdle
         #   level 0.6+    : add parkour_gap
-        # parkour_flat and stepping_stones stay available across all levels so a
-        # promoted env always has an easy fallback row to learn the harder
-        # variants of those same types (smaller stones) at high difficulty.
+        # parkour_flat stays available across all levels as the easy fallback.
         gen.terprog_bands = {
             "parkour_flat": (0.0, 1.0),
-            "stepping_stones": (0.0, 1.0),
             "parkour_step": (0.3, 1.0),
             "balance_beam": (0.4, 1.0),
             "parkour_hurdle": (0.5, 1.0),
