@@ -735,10 +735,12 @@ class FlatStageOneStage2STARTAlignedRewardsCfg(FlatStageOneStage2RewardsCfg):
     # is above the target while it has lateral velocity:
     # (foot_z_body - target)^2 * |foot_v_xy| summed over 4 feet -> encourages a
     # clean lift-and-swing arc and discourages dragging / shuffling into risers.
-    # Weight -0.0075 (between the disabled 0 and the DreamWaQ default -0.01).
+    # Weight -0.01 (DreamWaQ default; raised from the initial -0.0075 trial to
+    # push leg-lift harder so the robot clears hurdles/steps instead of ramming
+    # them with its head/body).
     reward_foot_clearance = RewTerm(
         func=rewards.reward_foot_clearance,
-        weight=-0.0075,
+        weight=-0.01,
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot"),
             "target_height": -0.18,

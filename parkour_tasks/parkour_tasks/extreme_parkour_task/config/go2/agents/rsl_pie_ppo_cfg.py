@@ -537,12 +537,16 @@ class ParkourRslRlPIESTARTEstimatorCfg(ParkourRslRlPIEHighCapEstimatorCfg):
     pie_use_adasmpl: bool = True
     pie_adasmpl_max_prob: float = 0.8
     loss_weights: dict[str, float] = {
-        "v": 1.5,
+        "v": 1.0,
         "h_f": 1.0,
         "height": 0.5,            # keep a small refined-map MSE for stability
         "next_proprio": 1.0,
         "kl": 1.0,
-        "terrain_adaptive": 2.0,
+        "terrain_adaptive": 0.0,  # disabled: not in PIE/START (was a self-added
+                                  # trick to upweight rough-terrain height/h_f
+                                  # loss; height is now accurate everywhere and
+                                  # it appeared to starve v_hat capacity -> vz
+                                  # estimate degraded. Back to paper equal-weight.)
         "height_rough": 1.0,      # START rough-map MSE
         "height_refined_l1": 1.0,  # START refined-map L1
     }
