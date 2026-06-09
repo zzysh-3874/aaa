@@ -728,10 +728,22 @@ class FlatStageOneStage2STARTAlignedRewardsCfg(FlatStageOneStage2RewardsCfg):
             "parkour_name": "base_parkour",
         },
     )
-    # Remove the DreamWaQ foot-clearance swing-arc penalty (not in START's
-    # reward set). The per-foot heightmap target + feet_edge already shape
-    # foot placement; this term is redundant for the START-aligned stack.
-    reward_foot_clearance = None
+    # Re-enable the DreamWaQ foot-clearance swing-arc penalty at -0.0075 (was
+    # removed for START alignment, but play showed the policy "rams into the
+    # step without lifting its feet" -- it never learned to pick its legs up
+    # over obstacles). This term penalises a swing foot whose body-frame height
+    # is above the target while it has lateral velocity:
+    # (foot_z_body - target)^2 * |foot_v_xy| summed over 4 feet -> encourages a
+    # clean lift-and-swing arc and discourages dragging / shuffling into risers.
+    # Weight -0.0075 (between the disabled 0 and the DreamWaQ default -0.01).
+    reward_foot_clearance = RewTerm(
+        func=rewards.reward_foot_clearance,
+        weight=-0.0075,
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot"),
+            "target_height": -0.18,
+        },
+    )
     # Swap the LINEAR goal-velocity tracking for START's dense EXPONENTIAL
     # form (Table I lin-vel tracking, arXiv 2512.13153) along the goal
     # direction. The linear version pays ~0 at low speed and is too weak to

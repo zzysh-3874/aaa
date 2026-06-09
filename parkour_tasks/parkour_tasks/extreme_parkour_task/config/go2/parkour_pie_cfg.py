@@ -918,25 +918,35 @@ class UnitreeGo2PIEFullParkourFrontFastStage2STARTSparseEnvCfg(
             for k in gen.sub_terrains:
                 gen.sub_terrains[k].proportion = share if k in present else 0.0
 
-        # START-style terrain progressive curriculum (TerProg): make the set of
-        # terrain TYPES available depend on the difficulty level (row). Early
-        # levels expose only the easy terrains so the policy can "acquire basic
-        # locomotion skills" (START II-D3) before facing risky terrains;
-        # harder terrains are introduced only at higher levels. Bands are
-        # (start_frac, end_frac) over the normalised level axis row/(num_rows-1).
-        #   level 0.0-0.3 : flat only (learn to walk)
-        #   level 0.3+    : add parkour_step
-        #   level 0.4+    : add balance_beam (still a wide walkway at low diff)
-        #   level 0.5+    : add parkour_hurdle
-        #   level 0.6+    : add parkour_gap
-        # parkour_flat stays available across all levels as the easy fallback.
-        gen.terprog_bands = {
-            "parkour_flat": (0.0, 1.0),
-            "parkour_step": (0.3, 1.0),
-            "balance_beam": (0.4, 1.0),
-            "parkour_hurdle": (0.5, 1.0),
-            "parkour_gap": (0.6, 1.0),
-        }
+        # TerProg disabled: every difficulty level (row) contains ALL terrain
+        # types; the 15 rows are a pure difficulty ramp (row 0 easiest -> row
+        # 14 hardest). Each type's geometry scales with difficulty=row/14, so
+        # at low rows every terrain is at its easiest. (Removing TerProg means
+        # gaps/hurdles/steps/beam all appear from level 0 in their easiest form,
+        # rather than unlocking at higher levels.)
+        gen.terprog_bands = None
+
+        # Lower the staircase: the inherited step_height "0.1 + 0.35*difficulty"
+        # starts at 0.10 m even at level 0, which is already too tall for a
+        # from-scratch Go2 to learn to lift its legs over -- it just face-plants
+        # into the first riser. Drop the base to ~0.03 m (a low curb the robot
+        # can shuffle over while learning) and the peak to ~0.22 m so the ramp
+        # is gentle. NOTE: a FrontFast difficulty-knee remap was applied to this
+        # string upstream; we overwrite it here with a fresh linear expression
+        # so the low base is guaranteed.
+        if "parkour_step" in gen.sub_terrains:
+            gen.sub_terrains["parkour_step"].step_height = "0.03 + 0.19 * difficulty"
+
+        # Lower the hurdles for the same reason: the inherited range
+        # "0.1+0.1*d, 0.15+0.25*d" puts a 0.10-0.15 m hurdle on level 0, too
+        # tall for a from-scratch Go2 to learn to clear (it trips on the first
+        # one). Drop the base to ~0.03-0.06 m (a low bump it can step over while
+        # learning) ramping to ~0.15-0.30 m at peak. Overwrite the upstream
+        # FrontFast-remapped string with a fresh linear expression.
+        if "parkour_hurdle" in gen.sub_terrains:
+            gen.sub_terrains["parkour_hurdle"].hurdle_height_range = (
+                "0.03 + 0.12 * difficulty, 0.06 + 0.24 * difficulty"
+            )
 
 
 def _swap_to_foot_heightmap_target(env_cfg) -> None:
