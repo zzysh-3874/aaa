@@ -735,15 +735,41 @@ class FlatStageOneStage2STARTAlignedRewardsCfg(FlatStageOneStage2RewardsCfg):
     # is above the target while it has lateral velocity:
     # (foot_z_body - target)^2 * |foot_v_xy| summed over 4 feet -> encourages a
     # clean lift-and-swing arc and discourages dragging / shuffling into risers.
-    # Weight -0.01 (DreamWaQ default; raised from the initial -0.0075 trial to
-    # push leg-lift harder so the robot clears hurdles/steps instead of ramming
-    # them with its head/body).
+    # Weight -0.005 (DreamWaQ default is -0.01; using a gentler -0.005 so the
+    # leg-lift incentive helps clear hurdles/steps without over-penalising the
+    # swing arc and making the gait stiff).
     reward_foot_clearance = RewTerm(
         func=rewards.reward_foot_clearance,
-        weight=-0.01,
+        weight=-0.005,
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot"),
             "target_height": -0.18,
+        },
+    )
+    # Halve the feet-air-time reward 0.2 -> 0.1: play showed the policy lifts its
+    # legs too high and stays airborne too long even on flat ground, because
+    # this term rewards long swing time everywhere (not just on obstacles).
+    # Lowering the weight keeps a mild anti-drag incentive without inflating an
+    # exaggerated high-stepping gait on flat terrain.
+    reward_feet_air_time = RewTerm(
+        func=rewards.reward_feet_air_time,
+        weight=0.1,
+        params={
+            "command_name": "base_velocity",
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot"),
+            "threshold": 0.15,
+        },
+    )
+    # Raise the action-jerk (2nd-order action difference) penalty -0.01 ->
+    # -0.015 to suppress the high-frequency limb jitter seen in play. jerk
+    # targets symbol-flipping jitter specifically; action_rate is left at
+    # -0.01 so large-but-smooth motions (needed to jump gaps/hurdles) are not
+    # over-penalised.
+    reward_action_jerk = RewTerm(
+        func=rewards.reward_action_jerk,
+        weight=-0.015,
+        params={
+            "action_name": "joint_pos",
         },
     )
     # Swap the LINEAR goal-velocity tracking for START's dense EXPONENTIAL

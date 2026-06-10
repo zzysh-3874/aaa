@@ -105,6 +105,15 @@ def main():
         "HEIGHT": 0, "ROLL": 0, "PITCH": 0, "FELL_OFF": 0, "REACH_GOAL": 0, "TIMEOUT": 0, "UNKNOWN": 0,
     })
 
+    # Per-terrain terrain_level distribution: every time an env resets, the
+    # env's own curriculum has just updated its terrain_level (move_up/down by
+    # whether it walked far enough). We record (terrain_name, new_level) at each
+    # reset so we can see whether gap/hurdle envs are stuck at a low level while
+    # flat/beam envs climb high -- i.e. whether the mean terrain_level is a
+    # misleading average. ``terrain.terrain_levels`` is per-env (post-reset).
+    terrain = unwrapped.scene.terrain
+    level_by_terrain = defaultdict(list)
+
     for step in range(args_cli.steps):
         with torch.no_grad():
             actions = policy(extras["observations"], hist_encoding=True)
@@ -148,6 +157,11 @@ def main():
 
         # reset accumulators for envs that ended (start_xy refreshes to new spawn)
         if done_idx.numel() > 0:
+            # Record the updated terrain_level for each ended env, keyed by the
+            # terrain TYPE it was just traversing (names_b snapshot pre-step).
+            lvls = terrain.terrain_levels.detach().cpu().numpy()
+            for i in done_idx.tolist():
+                level_by_terrain[str(names_b[i])].append(float(lvls[i]))
             start_xy[done_idx] = robot.data.root_state_w[done_idx, :2].clone()
             ep_len[done_idx] = 0
 
@@ -166,6 +180,21 @@ def main():
     print("=" * 100)
     print("how_far: mean meters before reset | goals: mean cur_goal_idx reached | compl%: reached all goals")
     print("termination columns are episode COUNTS per cause")
+
+    # Per-terrain terrain_level distribution (proves/refutes "mean level is
+    # inflated by easy terrains while gap/hurdle envs stay stuck low").
+    print("\n" + "=" * 70)
+    print("PER-TERRAIN terrain_level (post-reset, curriculum-updated)")
+    print("=" * 70)
+    print(f"{'terrain':16s} {'n':>5s} {'mean_lvl':>9s} {'min':>5s} {'max':>5s}")
+    print("-" * 70)
+    import numpy as _np
+    for name in sorted(level_by_terrain.keys()):
+        arr = _np.array(level_by_terrain[name], dtype=float)
+        if arr.size == 0:
+            continue
+        print(f"{name:16s} {arr.size:>5d} {arr.mean():>9.2f} {arr.min():>5.0f} {arr.max():>5.0f}")
+    print("=" * 70)
     env.close()
 
 
