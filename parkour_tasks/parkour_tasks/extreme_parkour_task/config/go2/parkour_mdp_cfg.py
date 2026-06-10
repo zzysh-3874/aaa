@@ -699,7 +699,11 @@ class FlatStageOneStage2STARTAlignedRewardsCfg(FlatStageOneStage2RewardsCfg):
         params={
             "asset_cfg": SceneEntityCfg("robot"),
             "parkour_name": "base_parkour",
-            "jump_terrains": ("parkour_gap", "parkour_hurdle"),
+            # Only flat ground and the balance beam must stay perfectly level
+            # (full -2.0). Every other terrain (gap / hurdle / step) is relaxed
+            # to -1.0 (jump_scale 0.5) so the robot can launch / step up
+            # vertically to clear them.
+            "full_penalty_terrains": ("parkour_flat", "balance_beam"),
             "jump_scale": 0.5,
         },
     )

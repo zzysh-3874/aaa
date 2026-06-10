@@ -267,23 +267,34 @@ def reward_lin_vel_z_jump_aware(
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     jump_terrains: tuple[str, ...] = ("parkour_gap", "parkour_hurdle"),
     jump_scale: float = 0.5,
+    full_penalty_terrains: tuple[str, ...] | None = None,
 ) -> torch.Tensor:
-    """Vertical-velocity penalty (v_z^2) that is relaxed on jump terrains.
+    """Vertical-velocity penalty (v_z^2) relaxed on terrains that need launch.
 
     START applies a flat v_z^2 penalty at -2.0 everywhere, which suppresses the
-    vertical launch needed to clear a wide gap or a tall hurdle. Here the raw
-    v_z^2 is scaled by ``jump_scale`` (default 0.5) on the env's whose current
-    sub-terrain is in ``jump_terrains`` (gap / hurdle), so with a cfg weight of
-    -2.0 those terrains see an effective -1.0 (room to launch) while flat /
-    stepping-stone / balance-beam terrains keep the full -2.0 (no wasteful bob).
+    vertical launch needed to clear gaps / hurdles / step up.
+
+    Two selection modes:
+    * If ``full_penalty_terrains`` is given, those terrains keep the FULL
+      penalty and every OTHER terrain is scaled by ``jump_scale``. Use this to
+      say "only flat ground and the balance beam must stay perfectly level;
+      everywhere else allow vertical motion for stepping/jumping".
+    * Otherwise (legacy) only terrains listed in ``jump_terrains`` are scaled
+      by ``jump_scale`` and the rest keep the full penalty.
     """
     parkour_event: ParkourEvent = env.parkour_manager.get_term(parkour_name)
     terrain_names = parkour_event.env_per_terrain_name  # (num_envs, 1) of str
     asset: Articulation = env.scene[asset_cfg.name]
     rew = torch.square(asset.data.root_lin_vel_b[:, 2])
-    is_jump = np.isin(terrain_names[:, -1], list(jump_terrains))
-    is_jump_t = torch.from_numpy(is_jump).to(device=rew.device)
-    rew[is_jump_t] *= jump_scale
+    if full_penalty_terrains is not None:
+        # Everything NOT in full_penalty_terrains gets relaxed.
+        is_full = np.isin(terrain_names[:, -1], list(full_penalty_terrains))
+        is_relaxed_t = torch.from_numpy(~is_full).to(device=rew.device)
+        rew[is_relaxed_t] *= jump_scale
+    else:
+        is_jump = np.isin(terrain_names[:, -1], list(jump_terrains))
+        is_jump_t = torch.from_numpy(is_jump).to(device=rew.device)
+        rew[is_jump_t] *= jump_scale
     return rew
 
 def reward_orientation_paper(
