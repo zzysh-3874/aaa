@@ -285,6 +285,17 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
             # No-op unless the estimator runner enabled pie_use_adasmpl.
             if hasattr(self.alg, "set_pie_adasmpl_prob_from_rewards"):
                 self.alg.set_pie_adasmpl_prob_from_rewards(rewbuffer)
+                # Stash the AdaSmpl prob + episode-reward CV so log() can write
+                # them to TensorBoard (otherwise these runtime-only values are
+                # never persisted and cannot be recovered later).
+                _vals = list(rewbuffer)
+                if len(_vals) >= 2:
+                    _mean = statistics.mean(_vals)
+                    _std = statistics.pstdev(_vals)
+                    self._adasmpl_reward_cv = (_std / abs(_mean)) if abs(_mean) > 1e-6 else 0.0
+                else:
+                    self._adasmpl_reward_cv = 0.0
+                self._adasmpl_prob = float(getattr(self.alg, "pie_adasmpl_prob", 0.0))
 
             # update policy
             loss_dict = self.alg.update()
@@ -494,6 +505,13 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
         self.writer.add_scalar("Perf/collection time", locs["collection_time"], locs["it"])
         self.writer.add_scalar("Perf/learning_time", locs["learn_time"], locs["it"])
 
+        # AdaSmpl GT-heightmap sampling probability + the episode-reward CV that
+        # drives it (p = min(tanh(CV), max_prob)). Runtime-only values, logged
+        # here so they show up in TensorBoard.
+        if hasattr(self, "_adasmpl_prob"):
+            self.writer.add_scalar("AdaSmpl/prob", self._adasmpl_prob, locs["it"])
+            self.writer.add_scalar("AdaSmpl/reward_cv", self._adasmpl_reward_cv, locs["it"])
+
         if len(locs["lenbuffer"]) > 0:
             self.writer.add_scalar("Train/mean_episode_length", statistics.mean(locs["lenbuffer"]), locs["it"])
             if self.logger_type != "wandb":  # wandb does not support non-integer x-axis logging
@@ -526,6 +544,11 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
             for key, value in locs["loss_dict"].items():
                 log_string += f"""{f'{key}:':>{pad}} {value:.4f}\n"""
         log_string += ep_string
+        if hasattr(self, "_adasmpl_prob"):
+            log_string += (
+                f"""{'AdaSmpl prob:':>{pad}} {self._adasmpl_prob:.4f} """
+                f"""(reward CV: {self._adasmpl_reward_cv:.4f})\n"""
+            )
         log_string += (
             f"""{'-' * width}\n"""
             f"""{'Total timesteps:':>{pad}} {self.tot_timesteps}\n"""

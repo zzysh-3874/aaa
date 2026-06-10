@@ -727,3 +727,63 @@ Beams MEV 从 0.52 降到 0.14)。corridor h_f target 是这个思路的轻量�
 - 新增 `scripts/rsl_rl/modules/feature_extractors/pie_estimator.py`，实现 PIEEstimator 最小骨架：depth CNN encoder、proprio MLP encoder、MLP/Transformer fusion 占位、GRU、`v_hat`/`h_f_hat`/`z_m`/`z_mu`/`z_logvar` heads，以及 `height_hat`/`next_proprio_hat` decoders；forward 会适配输入 tensor/单 term dict/flatten shape 和 hidden state device/dtype；新增随机 tensor shape test 和 PIE env forward smoke 脚本，并兼容本地 `parkour_tasks` 源码导入布局，失败时显式非零退出；Transformer 占位也复用本地 activation resolver。
 - 调整 PIEEstimator 融合结构：depth CNN 保留 2D feature map 并拆成 visual tokens，proprio history 的每个时间步各自编码为 proprio token，shared Transformer encoder 只在单时间步内做 visual/proprio 跨模态推理；Transformer 输出的 proprio token 和 pooled visual tokens concat 成时间序列后再送入 GRU，使 GRU 专注跨时间建模；shape test 新增 cross-modal sequence 断言，Transformer 内部激活默认使用 `gelu`。
 - 再次调整 PIEEstimator 融合语义：10 帧 proprio history 先 concat 成 `450` 维整体特征并编码为单个 proprio token，和 depth 2D feature map 拆出的 visual tokens 一次性进入 shared Transformer；Transformer 输出 concat 后作为长度为 1 的 fused step 输入 GRU，GRU 只承担跨 forward 调用的在线 memory；shape test 更新为 `(B, 1, gru_input_size)` 并覆盖 flattened proprio history 输入。
+
+
+---
+
+## 2026-06 近期改动：START 对齐 + 稀疏地形调试 + 卡 6.2 诊断（接续上方 TASK 1-7）
+
+### 背景
+继续 START（arXiv 2512.13153）对齐 + 让 Go2 过障碍。本阶段核心是反复 play/审计/分地形诊断，逐步定位"狗过不了 gap/hurdle/顶台阶不抬脚/动作抖动"，并对地形课程和 reward 做了一系列单变量调整。
+
+### 关键诊断结论（都用数据坐实）
+- **terrain_levels 平均值会骗人**：训练 TB 显示 terrain≈6.2，但分地形诊断（新脚本 `scripts/diagnose_per_terrain.py` 加了 per-terrain 平均 level 统计）实测各地形真实分布：balance_beam 4.17、flat 1.74、step 1.50、hurdle 1.43、**gap 0.93**。即 6.2 是被独木桥/平地拉高的平均，**gap/hurdle/step 这些需要抬腿/跳跃的地形根本卡在最低档**。
+- **梅花桩（stepping_stones）拖垮课程**：之前重做成"整条路+偶尔横沟"（`stepping_stones_terrain` 已改），但仍把 terrain 卡在 3.2（狗走到桩区就停，how_far~3m）。**已删除梅花桩**子地形。
+- **FrontFast 难度 knee 重映射是隐患**：`_reshape_difficulty_curve_knee`（knee_level=4, knee_value=0.6）是为旧 num_rows=10 设计的，d≤0.44 段把难度放大 1.35×。改 num_rows=15 后它和课程叠加，让 gap 在 level6 就到 0.43m（半身长，狗跳不过）。**已在稀疏 env 用线性公式覆盖 gap/step/hurdle 绕过 knee**。
+- **terrain_adaptive=2.0 拖累 v_hat**：审计发现 vz 估计误差 1.05（model_2250），关掉 terrain_adaptive + v 回 1.0 后 vz 降到 0.18。terrain_adaptive 是自创的（PIE/START 都没有），挤占了共享主干给 v_hat 的容量。**已关闭**。
+- **平地抬腿过高/腾空过久**：feet_air_time +0.2 不分地形，平地也奖励久腾空。**已降到 +0.1**。
+- **动作抖动**：高频颤动主要由 action_jerk（二阶差分）抓。**已从 -0.01 调到 -0.015**（action_rate 保持 -0.01 留越障大动作空间）。
+
+### 论文核对（estimator loss / reward 权重）
+- **START（2512.13153）estimator loss 全等权 1.0**（公式3 L_IE / 公式4 L_TR 无系数），无 terrain_adaptive。Table I 14 项 reward 含 lin_vel_z=-2.0、orientation=-1.0、无 foot_clearance/feet_air_time。
+- **PIE（2409.15692）无 reward 权重表**，只说"follows DreamWaQ[31]/Rudin[33]/Lee[34] 配置"+ 新增 feet_edge。**PIE 无公开代码**。foot_clearance（DreamWaQ）、feet_air_time（Rudin/legged_gym）算 PIE 血统内的标准项，保留合理。legged_gym 默认 lin_vel_z=-2.0。
+
+### 当前任务配置（`Isaac-PIE-FullParkour-START-FootHmap-Sparse-Stage2-Unitree-Go2-v0`）
+**地形（5 种，无梅花桩）**：parkour_flat / parkour_step / parkour_hurdle / parkour_gap / balance_beam
+- num_rows=**15**、num_cols=**27**（15×40 会 OOM，27 把 tile 数拉回 ~400）
+- **TerProg 关闭**（`gen.terprog_bands=None`）：所有地形每个 row 都有，纯难度递增 difficulty=level/14
+- 难度公式（稀疏 env `__post_init__` 里线性覆盖，绕过 FrontFast knee）：
+  - step `0.03 + 0.19*difficulty`（level0=3cm，峰值22cm）
+  - hurdle `0.03+0.12*d, 0.06+0.24*d`（level0=3-6cm）
+  - gap `0.05 + 0.50*difficulty`（level0=5cm/离散8cm，峰值55cm）
+  - balance_beam `0.90 - 0.65*difficulty`（level0=0.9m宽，峰值0.25m）
+
+**Estimator（监督 loss，回归论文等权）**：v=1.0, h_f=1.0, height=0.5, next_proprio=1.0, kl=1.0, **terrain_adaptive=0.0**, height_rough=1.0, height_refined_l1=1.0；AdaSmpl ceiling=0.65；z_m=64, h_f=36维, actor=182
+
+**Reward（FlatStageOneStage2STARTAlignedRewardsCfg）**：
+- 正：tracking_goal_vel(exp 形式)+1.5, tracking_yaw+0.5, goal_reached+1.0, feet_air_time **+0.1**
+- 姿态：orientation_paper -1.0（全地形，不分）, **lin_vel_z -2.0 但只 flat+beam 全额、gap/hurdle/step 减半到 -1.0**（`reward_lin_vel_z_jump_aware` 新增 `full_penalty_terrains=("parkour_flat","balance_beam")` 参数）
+- 落脚：collision -10.0(含头), feet_edge -1.0, feet_stumble -0.5, foot_clearance **-0.005**, base_height_below_target_flat -4.0(仅平地)
+- 平滑/正则：action_rate -0.01, **action_jerk -0.015**, dof_acc -2.5e-7, dof_error -0.01, hip_pos -0.5, dof_pos_limits -2.0, torques/joint_power/power_distribution 等小项
+
+**网络/PPO**：actor 182, **action_limit 0.8**(未改;注释说跨gap/hurdle可能需1.2,待验证), clip_actions 0.8, init_noise 1.0, max_noise 0.4, entropy 0.01
+**终止**：max_roll 1.0, max_pitch 1.4, min_height 0.20（宽，给从头训探索空间）
+
+### 当前训练
+- run `2gpu_linvelz_steprelax`，tmux `startsparse`，**GPU 0,1（2卡）**，num_envs 1024，从头训
+- 启动命令：`PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True CUDA_VISIBLE_DEVICES=0,1 torchrun --nproc_per_node=2 scripts/rsl_rl/train.py --task Isaac-PIE-FullParkour-START-FootHmap-Sparse-Stage2-Unitree-Go2-v0 --num_envs 1024 --max_iterations 50000 --headless --enable_cameras --distributed --run_name <name>`
+
+### NEXT STEPS / 待验证
+- 盯 terrain_levels + 几千轮后跑 `scripts/diagnose_per_terrain.py`（带 per-terrain level 分布），看 gap/hurdle/step 平均 level 是否从 0.9-1.5 提上来（这是 lin_vel_z 松绑 + 降难度的关键验证）
+- play 看：① 抬脚过 hurdle/step（不再顶）② 平地步态是否朴素（feet_air_time 降后）③ 抖动是否减轻（action_jerk）
+- 若 gap/hurdle 仍过不去 → 考虑 action_limit 0.8→1.2（注释明确跨 gap/hurdle 需要更大动作范围；但 resume 切 1.2 会动作突然放大站不稳，需从头训）
+- z_m 对 depth 仍钝（depth_shuffle→z_m≈0.01，AdaSmpl 喂真值副作用），靠 h_f 这条路补；非紧急
+
+### 关键文件
+- `parkour_tasks/.../config/go2/parkour_pie_cfg.py`（稀疏 env `__post_init__`：删梅花桩、TerProg=None、num_rows15/cols27、step/hurdle/gap 线性覆盖）
+- `parkour_tasks/.../config/go2/parkour_mdp_cfg.py`（`FlatStageOneStage2STARTAlignedRewardsCfg`：lin_vel_z full_penalty_terrains、foot_clearance -0.005、action_jerk -0.015、feet_air_time 0.1）
+- `parkour_tasks/.../config/go2/agents/rsl_pie_ppo_cfg.py`（estimator loss v=1.0/terrain_adaptive=0、AdaSmpl 0.65）
+- `parkour_isaaclab/envs/mdp/rewards.py`（`reward_lin_vel_z_jump_aware` 加 full_penalty_terrains）
+- `parkour_isaaclab/terrains/extreme_parkour/extreme_parkour_terrians.py`（`stepping_stones_terrain` 已改成路+横沟，但梅花桩已从任务移除）
+- `parkour_isaaclab/terrains/parkour_terrain_generator.py`（TerProg：`terprog_bands` + local-difficulty remap）
+- `scripts/diagnose_per_terrain.py`（分地形 how_far/终止/**per-terrain level 分布**诊断）
