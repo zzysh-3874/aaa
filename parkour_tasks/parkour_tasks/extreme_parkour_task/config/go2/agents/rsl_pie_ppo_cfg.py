@@ -668,6 +668,17 @@ class ParkourRslRlPIESTARTFootHmapLowAdaEstimatorCfg(ParkourRslRlPIESTARTFootHma
     reconstruction so z_m stays sensitive to depth."""
 
     pie_adasmpl_max_prob: float = 0.65
+    # START wean-off (designed for a 20000-iteration run): hold the GT-sampling
+    # ceiling at 0.65 for the first 6000 iters (build basic gait while CV is
+    # high), then linearly anneal the ceiling 0.65 -> 0 over 6000..16000, and
+    # keep it at 0 for the final 16000..20000 so the last ~4000 iters train on
+    # PURE reconstruction (= deployment / offline conditions). This guarantees
+    # the actor weans off the GT heightmap even when the episode-reward CV stays
+    # high (hard terrains keep success bimodal -> tanh(CV) pinned near 1), which
+    # is exactly why the un-annealed run looked strong in training (terrain 6.0)
+    # but collapsed offline (couldn't walk on reconstructed z_m).
+    pie_adasmpl_anneal_start: int = 6000
+    pie_adasmpl_anneal_end: int = 16000
 
 
 @configclass

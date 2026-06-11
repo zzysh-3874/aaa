@@ -174,6 +174,15 @@ class PPOWithExtractor(PPO):
         # reconstruction. Default off (prob stays 0) = backward compatible.
         self.pie_use_adasmpl = bool(estimator_paras.get("pie_use_adasmpl", False))
         self.pie_adasmpl_max_prob = float(estimator_paras.get("pie_adasmpl_max_prob", 0.8))
+        # START-style wean-off: linearly anneal the GT-sampling CEILING from
+        # pie_adasmpl_max_prob down to 0 between anneal_start and anneal_end
+        # iterations. Forces the actor onto its own reconstructed heightmap by
+        # late training (matching deployment) instead of staying pinned at
+        # max_prob whenever the episode-reward CV refuses to drop (which happens
+        # when hard terrains keep success bimodal). anneal_end None = no
+        # annealing (legacy: ceiling always = max_prob).
+        self.pie_adasmpl_anneal_start = estimator_paras.get("pie_adasmpl_anneal_start", None)
+        self.pie_adasmpl_anneal_end = estimator_paras.get("pie_adasmpl_anneal_end", None)
         self.pie_adasmpl_prob = 0.0
         history_encoder = getattr(getattr(self.policy, "actor", None), "history_encoder", None)
         if history_encoder is not None:
@@ -361,13 +370,30 @@ class PPOWithExtractor(PPO):
         self.reset_pie_actor_hidden()
         return {key: value / num_updates for key, value in mean_losses.items()}
 
-    def set_pie_adasmpl_prob_from_rewards(self, reward_buffer) -> float:
+    def _adasmpl_ceiling(self, it: int | None) -> float:
+        """Return the GT-sampling probability ceiling, linearly annealed from
+        ``pie_adasmpl_max_prob`` (at anneal_start) down to 0 (at anneal_end)."""
+        base = self.pie_adasmpl_max_prob
+        start = self.pie_adasmpl_anneal_start
+        end = self.pie_adasmpl_anneal_end
+        if it is None or end is None or start is None:
+            return base
+        if it <= start:
+            return base
+        if it >= end:
+            return 0.0
+        frac = (it - start) / max(1, (end - start))
+        return float(base * (1.0 - frac))
+
+    def set_pie_adasmpl_prob_from_rewards(self, reward_buffer, it: int | None = None) -> float:
         """Update AdaSmpl GT-sampling probability from reward coefficient of variation.
 
-        ``p = min(tanh(CV(R)), max_prob)`` where CV = std/|mean| over the recent
-        episode-reward buffer. Returns the new probability (0 when AdaSmpl off or
-        the buffer is too small / mean ~ 0). Called once per iteration by the
-        runner before the estimator update.
+        ``p = min(tanh(CV(R)), ceiling(it))`` where CV = std/|mean| over the
+        recent episode-reward buffer and ceiling(it) linearly anneals from
+        ``pie_adasmpl_max_prob`` to 0 across [anneal_start, anneal_end]. Returns
+        the new probability (0 when AdaSmpl off or the buffer is too small /
+        mean ~ 0). Called once per iteration by the runner before the estimator
+        update.
         """
         if not self.pie_use_adasmpl:
             self.pie_adasmpl_prob = 0.0
@@ -387,7 +413,8 @@ class PPOWithExtractor(PPO):
                 cv = std / abs(mean)
             import math
 
-            self.pie_adasmpl_prob = float(min(math.tanh(cv), self.pie_adasmpl_max_prob))
+            ceiling = self._adasmpl_ceiling(it)
+            self.pie_adasmpl_prob = float(min(math.tanh(cv), ceiling))
         except Exception:
             self.pie_adasmpl_prob = 0.0
         return self.pie_adasmpl_prob

@@ -284,7 +284,7 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
             # the recent episode-reward variability before the estimator update.
             # No-op unless the estimator runner enabled pie_use_adasmpl.
             if hasattr(self.alg, "set_pie_adasmpl_prob_from_rewards"):
-                self.alg.set_pie_adasmpl_prob_from_rewards(rewbuffer)
+                self.alg.set_pie_adasmpl_prob_from_rewards(rewbuffer, it=it)
                 # Stash the AdaSmpl prob + episode-reward CV so log() can write
                 # them to TensorBoard (otherwise these runtime-only values are
                 # never persisted and cannot be recovered later).
