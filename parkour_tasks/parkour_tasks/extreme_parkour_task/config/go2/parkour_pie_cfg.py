@@ -949,15 +949,13 @@ class UnitreeGo2PIEFullParkourFrontFastStage2STARTSparseEnvCfg(
             )
 
         # Reset the gap width to a clean LINEAR ramp, overwriting the upstream
-        # FrontFast knee remap. The knee (knee_value=0.6 at d_knee=4/9, computed
-        # back when num_rows was 10) multiplies low-difficulty by ~1.35, so with
-        # the current num_rows=15 the gap reached ~0.43 m by level 6 -- a
-        # half-body-length trench the from-scratch policy could not jump, which
-        # is exactly where terrain_levels stalled (~6.2). A pure linear ramp
-        # keeps the gap small for longer (0.32 m at level 6) so the policy has a
-        # gentler progression to learn jumping. Base 0.05 -> peak 0.55 m.
-        if "parkour_gap" in gen.sub_terrains:
-            gen.sub_terrains["parkour_gap"].gap_size = "0.05 + 0.50 * difficulty"
+        # REVERTED to paperloss: the gap_size override (linear "0.05 + 0.50 *
+        # difficulty") is removed so the parent FrontFast knee-remapped formula
+        # applies again, matching the paperloss-verified checkpoint we resume
+        # from. The linear ramp was part of the step-relax experiment that
+        # destabilised the estimator; keep terrain identical to paperloss so the
+        # resume sees the same curriculum it was trained on.
+        # (No parkour_gap.gap_size override here on purpose.)
 
 
 def _swap_to_foot_heightmap_target(env_cfg) -> None:

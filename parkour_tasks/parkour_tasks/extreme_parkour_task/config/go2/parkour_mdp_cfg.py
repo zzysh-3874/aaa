@@ -699,11 +699,14 @@ class FlatStageOneStage2STARTAlignedRewardsCfg(FlatStageOneStage2RewardsCfg):
         params={
             "asset_cfg": SceneEntityCfg("robot"),
             "parkour_name": "base_parkour",
-            # Only flat ground and the balance beam must stay perfectly level
-            # (full -2.0). Every other terrain (gap / hurdle / step) is relaxed
-            # to -1.0 (jump_scale 0.5) so the robot can launch / step up
-            # vertically to clear them.
-            "full_penalty_terrains": ("parkour_flat", "balance_beam"),
+            # REVERTED to the paperloss-verified config: only gap and hurdle
+            # relax the vertical-velocity penalty (jump_scale 0.5); step / flat /
+            # beam keep the FULL -2.0. The step-relaxed variant
+            # (full_penalty_terrains=flat,beam) let the robot bob freely on steps
+            # and produced a training dynamic where the estimator's v_z estimate
+            # diverged (vz_rmse 1.24 -> 1.58) and the policy never converged to a
+            # clean offline gait.
+            "jump_terrains": ("parkour_gap", "parkour_hurdle"),
             "jump_scale": 0.5,
         },
     )
@@ -744,7 +747,7 @@ class FlatStageOneStage2STARTAlignedRewardsCfg(FlatStageOneStage2RewardsCfg):
     # swing arc and making the gait stiff).
     reward_foot_clearance = RewTerm(
         func=rewards.reward_foot_clearance,
-        weight=-0.005,
+        weight=-0.01,
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot"),
             "target_height": -0.18,
@@ -757,7 +760,7 @@ class FlatStageOneStage2STARTAlignedRewardsCfg(FlatStageOneStage2RewardsCfg):
     # exaggerated high-stepping gait on flat terrain.
     reward_feet_air_time = RewTerm(
         func=rewards.reward_feet_air_time,
-        weight=0.1,
+        weight=0.2,
         params={
             "command_name": "base_velocity",
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot"),
@@ -771,7 +774,7 @@ class FlatStageOneStage2STARTAlignedRewardsCfg(FlatStageOneStage2RewardsCfg):
     # over-penalised.
     reward_action_jerk = RewTerm(
         func=rewards.reward_action_jerk,
-        weight=-0.015,
+        weight=-0.01,
         params={
             "action_name": "joint_pos",
         },

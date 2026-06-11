@@ -41,6 +41,11 @@ parser.add_argument("--play_init_level", type=int, default=None,
 parser.add_argument("--inference_noise_std", type=float, default=None,
                     help="Inject a fixed action noise std (e.g. 0.29 to match training). "
                          "Default None = deterministic (noise=0) like normal play.")
+parser.add_argument("--play_min_height", type=float, default=None,
+                    help="OBSERVE-ONLY: relax the minimum-height termination cutoff so a "
+                         "shaky cold-start does not instantly reset (e.g. 0.10).")
+parser.add_argument("--play_max_tilt", type=float, default=None,
+                    help="OBSERVE-ONLY: relax max_roll/max_pitch termination cutoffs (radians).")
 cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
@@ -65,6 +70,13 @@ def main():
     if args_cli.play_init_level is not None:
         env_cfg.scene.terrain.max_init_terrain_level = args_cli.play_init_level
         print(f"[DIAG] max_init_terrain_level -> {args_cli.play_init_level}")
+    if args_cli.play_min_height is not None:
+        env_cfg.terminations.total_terminates.params["minimum_height"] = args_cli.play_min_height
+        print(f"[DIAG] minimum_height -> {args_cli.play_min_height}")
+    if args_cli.play_max_tilt is not None:
+        env_cfg.terminations.total_terminates.params["max_roll"] = args_cli.play_max_tilt
+        env_cfg.terminations.total_terminates.params["max_pitch"] = args_cli.play_max_tilt
+        print(f"[DIAG] max_roll/max_pitch -> {args_cli.play_max_tilt}")
     agent_cfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
     env = gym.make(args_cli.task, cfg=env_cfg)
     env = ParkourRslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
@@ -128,6 +140,13 @@ def main():
         names_b = pe.env_per_terrain_name[:, -1].copy()  # (n,) str
 
         obs, _, dones, extras = env.step(actions)
+        # CRITICAL: reset the PIE actor GRU hidden state for envs that just
+        # terminated, exactly like play.py does. Without this the hidden state
+        # from the previous (possibly fallen) episode leaks into the freshly
+        # respawned env, producing garbage actions -> instant re-termination
+        # (the all-zero how_far / all-UNK artefact this script showed before).
+        if hasattr(policy, "reset"):
+            policy.reset(dones)
         ep_len += 1
 
         done_idx = dones.nonzero(as_tuple=False).flatten()
