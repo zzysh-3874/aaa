@@ -668,17 +668,20 @@ class ParkourRslRlPIESTARTFootHmapLowAdaEstimatorCfg(ParkourRslRlPIESTARTFootHma
     reconstruction so z_m stays sensitive to depth."""
 
     pie_adasmpl_max_prob: float = 0.65
-    # START wean-off (designed for a 20000-iteration run): hold the GT-sampling
-    # ceiling at 0.65 for the first 6000 iters (build basic gait while CV is
-    # high), then linearly anneal the ceiling 0.65 -> 0 over 6000..16000, and
-    # keep it at 0 for the final 16000..20000 so the last ~4000 iters train on
-    # PURE reconstruction (= deployment / offline conditions). This guarantees
-    # the actor weans off the GT heightmap even when the episode-reward CV stays
-    # high (hard terrains keep success bimodal -> tanh(CV) pinned near 1), which
-    # is exactly why the un-annealed run looked strong in training (terrain 6.0)
-    # but collapsed offline (couldn't walk on reconstructed z_m).
-    pie_adasmpl_anneal_start: int = 6000
-    pie_adasmpl_anneal_end: int = 16000
+    # START wean-off for the RESUME-from-paperloss plan: resume model_12750
+    # (iter continues at 12750) and train ~10000 more iters to 22750. Hold the
+    # GT-sampling ceiling at 0.65 for 12750..14000 (let the actor settle into
+    # the reverted reward first), then linearly anneal the ceiling 0.65 -> 0
+    # over 14000..21000 (a long 7000-iter wean so the actor -- which was trained
+    # by paperloss at a fixed 0.65 -- gradually adapts to its own reconstructed
+    # z_m instead of being cut off abruptly), then hold 0 for 21000..22750 so
+    # the last ~1750 iters train on PURE reconstruction (= deployment/offline
+    # conditions). Guarantees the actor weans off the GT heightmap even when the
+    # episode-reward CV stays high (hard terrains keep success bimodal ->
+    # tanh(CV) pinned near 1), which is why the un-annealed run looked strong in
+    # training (terrain 6.0) but collapsed offline (couldn't walk on recon z_m).
+    pie_adasmpl_anneal_start: int = 14000
+    pie_adasmpl_anneal_end: int = 21000
 
 
 @configclass
