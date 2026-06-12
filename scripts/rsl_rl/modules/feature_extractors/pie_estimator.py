@@ -141,6 +141,20 @@ class PIEEstimator(nn.Module):
         # This only wires the *capability*; the sampling probability is applied
         # by the training loop, which calls forward(..., gt_heightmap=...).
         use_heightmap_encoder: bool = False,
+        # ── Separated TR-Net (START-style two-stage) ────────────────────────
+        # When True, the network splits into an UPSTREAM TR-Net (depth+proprio
+        # -> reconstructed heightmap, supervised by MSE/L1) and a DOWNSTREAM
+        # policy estimator (consumes the reconstructed/GT heightmap + proprio ->
+        # v_hat / h_f / z_mu / z_m). This forces the actor's terrain code z_m to
+        # originate from a heightmap that the TR-Net reconstruction loss pushes
+        # to track the CURRENT depth, restoring the visual feed-forward link
+        # that the single-GRU + highway path short-circuited (the actor was
+        # reading terrain from GRU memory, not current depth -> couldn't see
+        # gaps ahead). Two GRUs are kept: the TR-Net GRU (memory for occluded /
+        # behind terrain, highway-gated as in CReF) and the policy GRU (decision
+        # timing). Their hidden states are merged into a single (2,B,H) tensor
+        # for transport so storage / sequence-training plumbing is unchanged.
+        use_separated_trnet: bool = False,
         **kwargs,
     ):
         super().__init__()
@@ -223,6 +237,27 @@ class PIEEstimator(nn.Module):
         next_proprio_input_dim = latent_dim + 3 + foot_height_dim
         self.next_proprio_decoder = _mlp(next_proprio_input_dim, [128], next_proprio_dim, activation)
 
+        # ── Separated TR-Net downstream policy estimator ────────────────────
+        self.use_separated_trnet = bool(use_separated_trnet)
+        if self.use_separated_trnet:
+            if self.heightmap_encoder is None:
+                # The downstream MUST get terrain via a heightmap encoding.
+                self.heightmap_encoder = _mlp(height_dim, [256, 128], z_m_dim, activation)
+            # Downstream proprio tokenizer (own encoder, mirrors upstream).
+            self.pol_proprio_encoder = _mlp(self.proprio_history_dim, [proprio_feature_dim], fusion_dim, activation)
+            # Downstream fuses [proprio_token(fusion_dim) + z_m(z_m_dim)] then a
+            # policy GRU integrates decision-timing memory. NO highway gate here
+            # (highway/memory belongs to the upstream reconstruction task).
+            self.pol_input_dim = fusion_dim + z_m_dim
+            self.pol_input_proj = _mlp(self.pol_input_dim, [self.fused_dim], self.fused_dim, activation)
+            self.pol_gru = nn.GRU(input_size=self.fused_dim, hidden_size=gru_hidden_dim, batch_first=True)
+            self.pol_recurrent_projector = nn.Linear(gru_hidden_dim, self.fused_dim)
+            # Downstream heads (replace the shared y heads for the policy path).
+            self.pol_v_head = nn.Linear(self.fused_dim, 3)
+            self.pol_h_f_head = nn.Linear(self.fused_dim, foot_height_dim)
+            self.pol_z_mu_head = nn.Linear(self.fused_dim, latent_dim)
+            self.pol_z_logvar_head = nn.Linear(self.fused_dim, latent_dim)
+
     def forward(
         self,
         depth: torch.Tensor | Mapping[str, torch.Tensor],
@@ -231,6 +266,10 @@ class PIEEstimator(nn.Module):
         gt_heightmap: torch.Tensor | None = None,
         adasmpl_prob: float = 0.0,
     ) -> dict[str, torch.Tensor]:
+        if self.use_separated_trnet:
+            return self._forward_separated(
+                depth, proprioception_history, hidden_state, gt_heightmap, adasmpl_prob
+            )
         depth = self._prepare_depth(depth)
         proprioception_history = self._prepare_proprioception_history(proprioception_history, depth.device)
         if hidden_state is not None:
@@ -296,6 +335,97 @@ class PIEEstimator(nn.Module):
             "rnn_hidden": next_hidden_state,
         }
 
+    def _forward_separated(
+        self,
+        depth: torch.Tensor | Mapping[str, torch.Tensor],
+        proprioception_history: torch.Tensor | Mapping[str, torch.Tensor],
+        hidden_state: torch.Tensor | None = None,
+        gt_heightmap: torch.Tensor | None = None,
+        adasmpl_prob: float = 0.0,
+    ) -> dict[str, torch.Tensor]:
+        """Two-stage START-style forward.
+
+        UPSTREAM TR-Net: depth + proprio -> cross-attn -> GRF -> GRU_tr +
+        highway -> reconstruct heightmap (rough + refined). Supervised by
+        MSE/L1 so the reconstruction tracks the CURRENT depth.
+
+        DOWNSTREAM policy estimator: encode the (reconstructed or, with AdaSmpl
+        prob, GT) heightmap into z_m, fuse with a proprio token, run the policy
+        GRU (decision memory, no highway), and emit v_hat / h_f / z_mu / z.
+
+        The two GRU hidden states are packed as a single (2,B,H) tensor:
+        index 0 = TR-Net GRU, index 1 = policy GRU.
+        """
+        depth = self._prepare_depth(depth)
+        proprioception_history = self._prepare_proprioception_history(proprioception_history, depth.device)
+        batch_size = proprioception_history.shape[0]
+
+        if hidden_state is not None:
+            hidden_state = hidden_state.to(device=depth.device, dtype=depth.dtype)
+            if hidden_state.shape[0] != 2:
+                # Came in as a single-layer hidden (e.g. legacy reset); expand.
+                hidden_state = hidden_state.expand(2, -1, -1).contiguous()
+            h_tr = hidden_state[0:1].contiguous()
+            h_pol = hidden_state[1:2].contiguous()
+        else:
+            h_tr = None
+            h_pol = None
+
+        # ── Upstream TR-Net: reconstruct heightmap ──────────────────────────
+        fused_step = self.encode_cross_modal_sequence(depth, proprioception_history)
+        gru_out_tr, next_h_tr = self.gru(fused_step, h_tr)
+        z_rec = self.recurrent_projector(gru_out_tr[:, -1])
+        f = fused_step.squeeze(1)
+        beta = torch.sigmoid(self.highway_gate(torch.cat((z_rec, f), dim=-1)))
+        y_tr = beta * z_rec + (1.0 - beta) * f
+
+        z_b = self.z_m_head(y_tr)
+        height_rough = self.height_decoder(z_b)
+        if self.height_refine is not None:
+            height_refined = self.height_refine(height_rough)
+        else:
+            height_refined = height_rough
+
+        # ── Heightmap fed to the policy (reconstruction, or GT via AdaSmpl) ──
+        policy_heightmap = height_refined
+        if gt_heightmap is not None and adasmpl_prob > 0.0:
+            gt_heightmap = gt_heightmap.to(device=height_refined.device, dtype=height_refined.dtype)
+            use_gt = (torch.rand(height_refined.shape[0], 1, device=height_refined.device) < adasmpl_prob)
+            policy_heightmap = torch.where(use_gt, gt_heightmap, height_refined)
+        z_m = self.heightmap_encoder(policy_heightmap)
+
+        # ── Downstream policy estimator ─────────────────────────────────────
+        pol_proprio_token = self.pol_proprio_encoder(
+            proprioception_history.reshape(batch_size, self.proprio_history_dim)
+        )
+        pol_in = self.pol_input_proj(torch.cat((pol_proprio_token, z_m), dim=-1))
+        gru_out_pol, next_h_pol = self.pol_gru(pol_in.unsqueeze(1), h_pol)
+        y_pol = self.pol_recurrent_projector(gru_out_pol[:, -1])
+
+        v_hat = self.pol_v_head(y_pol)
+        h_f_hat = self.pol_h_f_head(y_pol)
+        z_mu = self.pol_z_mu_head(y_pol)
+        z_logvar = self.pol_z_logvar_head(y_pol)
+        z = self._latent_sample(z_mu, z_logvar)
+
+        next_proprio_hat = self.next_proprio_decoder(torch.cat((z, v_hat, h_f_hat), dim=-1))
+
+        next_hidden_state = torch.cat((next_h_tr, next_h_pol), dim=0)
+
+        return {
+            "v_hat": v_hat,
+            "h_f_hat": h_f_hat,
+            "z_m": z_m,
+            "z": z,
+            "z_t": z,
+            "z_mu": z_mu,
+            "z_logvar": z_logvar,
+            "height_hat": height_refined,
+            "height_hat_rough": height_rough,
+            "next_proprio_hat": next_proprio_hat,
+            "rnn_hidden": next_hidden_state,
+        }
+
     def forward_obs_dict(
         self,
         obs_dict: Mapping[str, torch.Tensor | Mapping[str, torch.Tensor]],
@@ -316,7 +446,11 @@ class PIEEstimator(nn.Module):
     def initial_hidden(self, batch_size: int, device: torch.device | str | None = None) -> torch.Tensor:
         if device is None:
             device = next(self.parameters()).device
-        return torch.zeros(1, batch_size, self.gru_hidden_dim, device=device)
+        # Separated TR-Net carries TWO GRU hidden states (TR-Net + policy)
+        # merged along the num-layers dim as (2, B, H); the single-GRU path
+        # uses (1, B, H). Downstream transport code is shape-agnostic.
+        num_layers = 2 if getattr(self, "use_separated_trnet", False) else 1
+        return torch.zeros(num_layers, batch_size, self.gru_hidden_dim, device=device)
 
     def encode_cross_modal_sequence(
         self,

@@ -668,6 +668,13 @@ class ParkourRslRlPIESTARTFootHmapLowAdaEstimatorCfg(ParkourRslRlPIESTARTFootHma
     reconstruction so z_m stays sensitive to depth."""
 
     pie_adasmpl_max_prob: float = 0.65
+    # Separated TR-Net (START two-stage): upstream reconstructs the heightmap
+    # (supervised by depth), downstream policy estimator reads z_m from that
+    # reconstruction (no GRU-memory shortcut to the actor). This restores the
+    # visual feed-forward link so the actor can SEE a gap ahead instead of
+    # inferring it from body state after stepping into it. NOT checkpoint
+    # compatible with the single-GRU runs (new pol_* params + 2-layer hidden).
+    use_separated_trnet: bool = True
     # START wean-off for the RESUME-from-paperloss plan: resume model_12750
     # (iter continues at 12750) and train ~10000 more iters to 22750. Hold the
     # GT-sampling ceiling at 0.65 for 12750..14000 (let the actor settle into
