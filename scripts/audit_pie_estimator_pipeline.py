@@ -189,7 +189,7 @@ def main() -> None:
         sensitivity_sq={
             f"{source}_{key}": 0.0
             for source in ("depth_shuffle", "proprio_shuffle")
-            for key in ("z_mu", "z_m", "v_hat", "h_f_hat")
+            for key in ("z_mu", "z_m", "v_hat", "h_f_hat", "height_hat")
         },
         actor_ablation_sq={},
         internal_actor_ablation_sq={},
@@ -403,7 +403,7 @@ def accumulate_sensitivity_stats(
         depth_predictions = runner.alg.estimator.forward_obs_dict(depth_shuffled, hidden_state=hidden)
         proprio_predictions = runner.alg.estimator.forward_obs_dict(proprio_shuffled, hidden_state=hidden)
 
-    for key in ("z_mu", "z_m", "v_hat", "h_f_hat"):
+    for key in ("z_mu", "z_m", "v_hat", "h_f_hat", "height_hat"):
         stats.sensitivity_sq[f"depth_shuffle_{key}"] += torch.square(
             depth_predictions[key] - predictions[key]
         ).mean().item()
@@ -467,6 +467,15 @@ def accumulate_internal_path_stats(
     predictions: dict[str, torch.Tensor],
     baseline_actor_obs: torch.Tensor,
 ) -> None:
+    # The internal-path probes (cross_attention / gru / highway ablations) are
+    # hand-wired for the SINGLE-GRU architecture (estimator.gru expects a
+    # 1-layer hidden, shared v/z heads). The separated TR-Net has two GRUs, a
+    # 2-layer merged hidden, and downstream pol_* heads, so these probes are
+    # not meaningful (and crash on the hidden-size check). Skip them; the
+    # depth/proprio sensitivity probe (the key signal for vision usage) runs
+    # separately via forward_obs_dict and IS compatible.
+    if getattr(runner.alg.estimator, "use_separated_trnet", False):
+        return
     with torch.no_grad():
         internal = forward_estimator_internal(runner.alg.estimator, obs_dict, hidden)
         baseline_action = runner.alg.policy.act_inference(baseline_actor_obs, hist_encoding=True)
@@ -684,14 +693,15 @@ def print_summary(stats: EstimatorStats, runner: OnPolicyRunnerWithExtractor) ->
         )
 
     emit("\n=== ONLINE INPUT SENSITIVITY RMS ===")
-    emit("source          | z_mu     | z_m      | v_hat    | h_f_hat")
+    emit("source          | z_mu     | z_m      | v_hat    | h_f_hat  | height_hat")
     for source in ("depth_shuffle", "proprio_shuffle"):
         emit(
             f"{source:<15} | "
             f"{(stats.sensitivity_sq[f'{source}_z_mu'] / denom) ** 0.5:8.5f} | "
             f"{(stats.sensitivity_sq[f'{source}_z_m'] / denom) ** 0.5:8.5f} | "
             f"{(stats.sensitivity_sq[f'{source}_v_hat'] / denom) ** 0.5:8.5f} | "
-            f"{(stats.sensitivity_sq[f'{source}_h_f_hat'] / denom) ** 0.5:8.5f}"
+            f"{(stats.sensitivity_sq[f'{source}_h_f_hat'] / denom) ** 0.5:8.5f} | "
+            f"{(stats.sensitivity_sq[f'{source}_height_hat'] / denom) ** 0.5:8.5f}"
         )
 
     emit("\n=== ACTOR FEATURE ABLATION ACTION RMS ===")
