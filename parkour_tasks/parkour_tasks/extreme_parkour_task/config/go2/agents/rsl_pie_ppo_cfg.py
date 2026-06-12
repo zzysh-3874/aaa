@@ -675,20 +675,15 @@ class ParkourRslRlPIESTARTFootHmapLowAdaEstimatorCfg(ParkourRslRlPIESTARTFootHma
     # inferring it from body state after stepping into it. NOT checkpoint
     # compatible with the single-GRU runs (new pol_* params + 2-layer hidden).
     use_separated_trnet: bool = True
-    # START wean-off for the RESUME-from-paperloss plan: resume model_12750
-    # (iter continues at 12750) and train ~10000 more iters to 22750. Hold the
-    # GT-sampling ceiling at 0.65 for 12750..14000 (let the actor settle into
-    # the reverted reward first), then linearly anneal the ceiling 0.65 -> 0
-    # over 14000..21000 (a long 7000-iter wean so the actor -- which was trained
-    # by paperloss at a fixed 0.65 -- gradually adapts to its own reconstructed
-    # z_m instead of being cut off abruptly), then hold 0 for 21000..22750 so
-    # the last ~1750 iters train on PURE reconstruction (= deployment/offline
-    # conditions). Guarantees the actor weans off the GT heightmap even when the
-    # episode-reward CV stays high (hard terrains keep success bimodal ->
-    # tanh(CV) pinned near 1), which is why the un-annealed run looked strong in
-    # training (terrain 6.0) but collapsed offline (couldn't walk on recon z_m).
-    pie_adasmpl_anneal_start: int = 14000
-    pie_adasmpl_anneal_end: int = 21000
+    # START wean-off (from-scratch 20000-iter run with the separated TR-Net):
+    # hold the GT-sampling ceiling at 0.65 for the first 6000 iters (build basic
+    # gait + heightmap reconstruction while CV is high), linearly anneal the
+    # ceiling 0.65 -> 0 over 6000..16000, then pure reconstruction 16000..20000.
+    # Forces the downstream policy onto the TR-Net's depth-driven reconstruction
+    # by late training (= deployment), so the actor's terrain code z_m is
+    # grounded in current vision rather than GT.
+    pie_adasmpl_anneal_start: int = 6000
+    pie_adasmpl_anneal_end: int = 16000
 
 
 @configclass
