@@ -703,6 +703,36 @@ def reward_tracking_goal_vel_exp(
     error = tracked - command_vel
     return torch.exp(-torch.square(error) / std)
 
+def reward_tracking_lin_vel_paper(
+    env: ParkourManagerBasedRLEnv,
+    command_name: str = "base_velocity",
+    std: float = 0.25,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    ) -> torch.Tensor:
+    """START Table I linear-velocity tracking (arXiv 2512.13153), exact form.
+
+        r = exp(-||min(v, v_cmd) - v_cmd||^2 / 0.25)
+
+    where ``v`` is the robot's BODY-FRAME forward velocity (v_x in the base
+    frame) and ``v_cmd`` is the commanded forward speed. ``min(v, v_cmd)``
+    removes the bonus for overshooting the command. This is the pure START
+    formulation: it tracks body-frame forward speed against the velocity
+    command, with NO goal-direction projection.
+
+    Differs from ``reward_tracking_goal_vel_exp`` (which projects velocity onto
+    the unit vector toward the next parkour waypoint to preserve a navigation
+    signal). On the straightened centre-line terrain the goal direction is ~+x
+    so the two are nearly equivalent, but this form matches START exactly: it
+    is the body-frame v_x that START rewards, decoupled from waypoint geometry.
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    command_vel = command[:, 0]
+    v_x = asset.data.root_lin_vel_b[:, 0]
+    tracked = torch.minimum(v_x, command_vel)
+    error = tracked - command_vel
+    return torch.exp(-torch.square(error) / std)
+
 def reward_tracking_yaw(     
     env: ParkourManagerBasedRLEnv, 
     parkour_name : str, 

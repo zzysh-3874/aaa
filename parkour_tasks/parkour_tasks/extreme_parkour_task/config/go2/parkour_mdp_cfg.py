@@ -717,24 +717,19 @@ class FlatStageOneStage2STARTAlignedRewardsCfg(FlatStageOneStage2RewardsCfg):
             "asset_cfg": SceneEntityCfg("robot"),
         },
     )
-    # Re-enable the goal-reached sparse bonus. It was dropped to match START's
-    # reward set, but START's terrains are all straight (pure forward velocity
-    # command, no goal direction), so it has no "stand still facing the goal"
-    # exploit. THIS task is goal-based with waypoints offset in y, so every
-    # dense forward reward (tracking_goal_vel, tracking_yaw) can be farmed by a
-    # slow-shuffle / in-place gait that minimises the ang_vel_xy + dof_acc
-    # penalties: observed mean_reward CLIMBING while how_far DECAYED (1.83 ->
-    # 0.97) as the policy converged on a high-reward stationary pose. goal_reached
-    # is the only reward that cannot be farmed without actually crossing a
-    # waypoint, so it is the anti-loafing anchor that the June-5 from-scratch
-    # run (which reached terrain 5.38) relied on. Weight 1.0 matches that run.
-    reward_goal_reached = RewTerm(
-        func=rewards.reward_goal_reached,
-        weight=1.0,
-        params={
-            "parkour_name": "base_parkour",
-        },
-    )
+    # START Table I has NO goal-reached bonus -- it relies purely on the dense
+    # body-frame velocity tracking. It was previously re-enabled here as an
+    # anti-loafing anchor for the goal-based task (waypoints offset in y, where
+    # the dense reward could be farmed by a slow shuffle). That exploit is gone
+    # now: the terrain is straightened (waypoints on the +x centre-line) and the
+    # velocity reward tracks body-frame v_x against the forward command, so
+    # there is no goal geometry left to game. Drop it for full START alignment.
+    # NOTE: standing still still yields a partial velocity reward
+    # (exp(-v_cmd^2/0.25) ~ 0.37 of weight at v_cmd=0.5), but the terrain
+    # curriculum demotes loafers via the forward-distance move_up/move_down
+    # check (dis_to_start), which is how START itself prevents loafing without a
+    # goal bonus.
+    reward_goal_reached = None
     # Re-enable the DreamWaQ foot-clearance swing-arc penalty at -0.0075 (was
     # removed for START alignment, but play showed the policy "rams into the
     # step without lifting its feet" -- it never learned to pick its legs up
@@ -791,12 +786,22 @@ class FlatStageOneStage2STARTAlignedRewardsCfg(FlatStageOneStage2RewardsCfg):
     # goal_reached bonus -- this is how START sustains locomotion. Keeps the
     # goal-direction projection so the navigation signal (waypoints offset in
     # y) is preserved, unlike START's pure body-frame command tracking.
+    # Swap to START's EXACT linear-velocity tracking (Table I, arXiv
+    # 2512.13153): r = exp(-||min(v_x, v_cmd) - v_cmd||^2 / 0.25), weight 1.5,
+    # where v_x is the BODY-FRAME forward velocity tracked against the forward
+    # command -- no goal-direction projection. Previously used
+    # reward_tracking_goal_vel_exp, a hybrid that projects velocity onto the
+    # unit vector toward the next waypoint (to keep a navigation signal). With
+    # the terrain now straightened (waypoints on the +x centre-line) the goal
+    # direction is ~+x, so the projection is ~v_x anyway; this makes the reward
+    # exactly the paper's body-frame form and decouples it from waypoint
+    # geometry. std=0.25 follows the paper.
     reward_tracking_goal_vel = RewTerm(
-        func=rewards.reward_tracking_goal_vel_exp,
+        func=rewards.reward_tracking_lin_vel_paper,
         weight=1.5,
         params={
             "asset_cfg": SceneEntityCfg("robot"),
-            "parkour_name": "base_parkour",
+            "command_name": "base_velocity",
             "std": 0.25,
         },
     )
