@@ -723,14 +723,33 @@ class UnitreeGo2PIESTARTFootHmapLowAdaStage2PPORunnerCfg(UnitreeGo2PIESTARTFootH
 
 
 @configclass
+class ParkourRslRlPIESTARTFootHmapLowAdaGapOnly30kEstimatorCfg(
+    ParkourRslRlPIESTARTFootHmapLowAdaEstimatorCfg
+):
+    """LowAda estimator with the AdaSmpl ceiling anneal window stretched to a
+    30000-iter run.
+
+    The base LowAda window (6000..16000) was scaled for a 20000-iter run (hold
+    GT-sampling for the first 30%, anneal to pure reconstruction by 80%). For
+    the 30000-iter gap-only run, keep the same proportions: hold to 9000 (30%),
+    anneal 9000..24000 (to 80%), then pure reconstruction 24000..30000.
+    """
+
+    pie_adasmpl_anneal_start: int = 9000
+    pie_adasmpl_anneal_end: int = 24000
+
+
+@configclass
 class UnitreeGo2PIESTARTFootHmapLowAdaGapOnlyStage2PPORunnerCfg(
     UnitreeGo2PIESTARTFootHmapLowAdaStage2PPORunnerCfg
 ):
     """Gap-only START Stage-2 FootHmap runner: same as the LowAda Stage-2 runner
     but checkpoints every 500 iters (vs the inherited 2000) so the early
-    gap-traversal learning curve can be inspected frequently."""
+    gap-traversal learning curve can be inspected frequently, and the AdaSmpl
+    anneal window is stretched to a 30000-iter run (9000..24000)."""
 
     save_interval = 500
+    estimator = ParkourRslRlPIESTARTFootHmapLowAdaGapOnly30kEstimatorCfg()
 
 
 @configclass
