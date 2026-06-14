@@ -826,6 +826,26 @@ class FlatStageOneStage2STARTAlignedRewardsCfg(FlatStageOneStage2RewardsCfg):
             "force_threshold": 1.0,
         },
     )
+    # Align the yaw reward to START Table I (arXiv 2512.13153):
+    #   Ang. vel. tracking = exp(-||w_yaw - w_yaw_cmd||^2 / 0.25), weight 0.5.
+    # The inherited Teacher ``reward_tracking_yaw`` tracks the absolute HEADING
+    # ANGLE with exp(-|target_yaw - yaw|) (no 0.25 temperature) -- a different
+    # quantity (heading angle vs yaw RATE) and a different kernel (L1 vs squared
+    # /0.25). Disable it and use ``reward_ang_vel_yaw_command_tracking``, which
+    # is exactly START's form: ParkourCommand's vel_command_b[:,2] is the
+    # heading-error-derived yaw-rate command, and the reward is
+    # exp(-4.0*(cmd - w_yaw)^2) == exp(-(.)^2/0.25). On the straightened
+    # centre-line terrain the heading error is ~0 so this still resolves to
+    # "hold +x heading", but now matching the paper's yaw-rate tracking.
+    reward_tracking_yaw = None
+    reward_ang_vel_yaw_command_tracking = RewTerm(
+        func=rewards.reward_ang_vel_yaw_command_tracking,
+        weight=0.5,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "command_name": "base_velocity",
+        },
+    )
 
 
 @configclass

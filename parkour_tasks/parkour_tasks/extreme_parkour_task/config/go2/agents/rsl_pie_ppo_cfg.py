@@ -546,7 +546,13 @@ class ParkourRslRlPIESTARTEstimatorCfg(ParkourRslRlPIEHighCapEstimatorCfg):
     loss_weights: dict[str, float] = {
         "v": 1.0,
         "h_f": 1.0,
-        "height": 0.5,            # keep a small refined-map MSE for stability
+        "height": 0.0,            # START supervises the refined map with L1 ONLY
+                                  # (eq 4); the extra refined-map MSE (was 0.5
+                                  # "for stability") re-introduces the
+                                  # over-smoothing START avoids and blurs the
+                                  # terrain edges that sparse footholds
+                                  # (beam/gap) depend on. Pure rough-MSE +
+                                  # refined-L1 now == START eq 4.
         "next_proprio": 1.0,
         "kl": 1.0,
         "terrain_adaptive": 0.0,  # disabled: not in PIE/START (was a self-added
