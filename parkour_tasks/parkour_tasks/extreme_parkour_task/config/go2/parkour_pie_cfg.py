@@ -1038,6 +1038,12 @@ class UnitreeGo2PIEFullParkourFrontFastStage2STARTSparseFootHmapGapOnlyEnvCfg(
         # Collapse to gap-only: parkour_gap 1.0, everything else 0.0.
         for _name in gen.sub_terrains:
             gen.sub_terrains[_name].proportion = 1.0 if _name == "parkour_gap" else 0.0
+
+
+@configclass
+class UnitreeGo2PIEFullParkourFrontFastStage2PlayEnvCfg(
+    UnitreeGo2PIEFullParkourFrontFastStage2EnvCfg
+):
     """PLAY-ONLY variant: relaxed termination + spawn directly on hard terrain.
 
     Identical to the training env (same curriculum shaping, rewards, network)
