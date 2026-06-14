@@ -311,11 +311,29 @@ class PPOWithExtractor(PPO):
                 target_shapes["foot_clearance"] = (foot_dim,)
             if height_dim:
                 target_shapes["height_scan"] = (height_dim,)
+        # Derive proprio history / next-proprio widths from the estimator so a
+        # non-default proprio_dim (e.g. 45 after dropping the 2 delta_yaw obs)
+        # is stored at the right width instead of the hardcoded 47 defaults.
+        # Without this the rollout storage rejects the (B,10,45) history with
+        # "proprioception_history must have shape (B,10,47)".
+        proprio_dim = int(getattr(self.estimator, "proprio_dim", 0) or 0)
+        history_len = int(getattr(self.estimator, "proprio_history_len", 0) or 0)
+        next_proprio_dim = int(getattr(self.estimator, "next_proprio_dim", 0) or 0)
+        proprioception_history_shape = None
+        if proprio_dim and history_len:
+            proprioception_history_shape = (history_len, proprio_dim)
+        if next_proprio_dim:
+            target_shapes = target_shapes or {}
+            target_shapes["next_proprioception"] = (next_proprio_dim,)
+        storage_kwargs = {}
+        if proprioception_history_shape is not None:
+            storage_kwargs["proprioception_history_shape"] = proprioception_history_shape
         self.pie_estimator_storage = PIEEstimatorRolloutStorage(
             num_envs=num_envs,
             num_transitions_per_env=num_transitions_per_env,
             target_shapes=target_shapes,
             device=self.device,
+            **storage_kwargs,
         )
 
     def cache_pie_estimator_step(self, obs_dict) -> PIEEstimatorStepInput | None:

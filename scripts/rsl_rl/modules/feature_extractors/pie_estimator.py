@@ -163,6 +163,7 @@ class PIEEstimator(nn.Module):
         self.proprio_dim = proprio_dim
         self.proprio_history_len = proprio_history_len
         self.proprio_history_dim = proprio_history_len * proprio_dim
+        self.next_proprio_dim = next_proprio_dim
         self.depth_feature_map_shape = depth_feature_map_shape
         self.fusion_dim = fusion_dim
         self.gru_hidden_dim = gru_hidden_dim
