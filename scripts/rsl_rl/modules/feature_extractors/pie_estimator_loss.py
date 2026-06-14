@@ -55,7 +55,7 @@ def build_pie_transition_targets(
     current_targets: Mapping[str, torch.Tensor],
     next_obs_dict: Mapping[str, torch.Tensor | Mapping[str, torch.Tensor]],
     policy_key: str = "policy",
-    next_proprio_dim: int = 47,
+    next_proprio_dim: int = 45,
     clone: bool = True,
     dones: torch.Tensor | None = None,
     terminated: torch.Tensor | None = None,

@@ -25,7 +25,7 @@ def build(**over):
     kw = dict(
         depth_channels=2,
         depth_image_shape=(58, 87),
-        proprio_dim=47,
+        proprio_dim=45,
         proprio_history_len=10,
         z_m_dim=64,
         latent_dim=32,
@@ -47,7 +47,7 @@ def main():
     est.eval()
 
     depth = torch.randn(B, 2, 58, 87)
-    proprio = torch.randn(B, 10, 47)
+    proprio = torch.randn(B, 10, 45)
 
     # initial hidden must be (2, B, H)
     h0 = est.initial_hidden(B, device="cpu")

@@ -87,15 +87,15 @@ class ParkourRslRlPIEBridgeActorCriticCfg(ParkourRslRlPIEActorCriticCfg):
 class ParkourRslRlPIEEstimatorCfg:
     class_name: str = "PIEEstimator"
     learning_rate: float = 1.0e-4
-    proprio_dim: int = 47
-    next_proprio_dim: int = 47
+    proprio_dim: int = 45
+    next_proprio_dim: int = 45
     sample_latent_in_training: bool = False
     train_with_estimated_states: bool = False
     use_pie_estimator_rollout: bool = True
     use_pie_actor_features: bool = True
     detach_pie_actor_features: bool = True
     pie_joint_actor_estimator: bool = False
-    pie_policy_obs_dim: int = 47
+    pie_policy_obs_dim: int = 45
     pie_actor_estimator_grad_scale: float = 1.0
     pie_actor_feature_clip: float | None = 5.0
     pie_actor_feature_keys: tuple[str, ...] = ("z_m", "z_mu", "v_hat", "h_f_hat")
@@ -623,7 +623,7 @@ class ParkourRslRlPIESTARTFootHmapFlatWarmupEstimatorCfg(ParkourRslRlPIESTARTFla
 class ParkourRslRlPIESTARTFootHmapActorCriticCfg(ParkourRslRlPIEHighCapNoiseCapActorCriticCfg):
     """Actor for the per-foot heightmap variant: h_f=36 widens input to 182."""
 
-    num_actor_obs: int = 182
+    num_actor_obs: int = 180
 
 
 @configclass

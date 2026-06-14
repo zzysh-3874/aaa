@@ -165,36 +165,25 @@ def pie_proprioception(
 ) -> torch.Tensor:
     """PIE proprioceptive observation with fixed velocity scaling.
 
-    Layout (47 dims total):
+    Layout (45 dims total):
         - root angular velocity in base frame  (3)
         - projected gravity                    (3)
         - velocity command (vx, vy, omega)     (3)
         - joint position offset from default   (12)
         - joint velocity (scaled)              (12)
         - previous action                      (12)
-        - delta_yaw to current goal            (1)
-        - delta_yaw to next-after-current goal (1)
 
-    The delta_yaw signals are added so the actor can directly observe how
-    much the next two goal headings differ from the robot's current yaw, the
-    same lookahead the Teacher policy already enjoys. They are deployable on
-    the real robot as long as an external planner / operator provides the
-    next two waypoints.
+    The two delta_yaw goal-heading signals were removed (47 -> 45): the
+    straightened terrain aligns every waypoint/obstacle on the centre-line so
+    target_yaw ~ 0 and the yaw lookahead carried no information, while forcing
+    the policy to navigate purely from depth + proprio (matching the START
+    paper's 45-dim proprio). reward_tracking_yaw still uses target_yaw from the
+    parkour event (not from this obs), so heading is still shaped.
     """
     asset: Articulation = env.scene[asset_cfg.name]
-    parkour_event: ParkourEvent = env.parkour_manager.get_term(parkour_name)
     commands = env.command_manager.get_command(command_name)
     command_scale = commands.new_tensor(PIE_COMMAND_SCALE)
     previous_action = env.action_manager.get_term(action_name).action_history_buf[:, -1]
-
-    # Robot yaw from quaternion; same convention as ExtremeParkourObservations.
-    q = asset.data.root_quat_w
-    yaw = torch.atan2(
-        2.0 * (q[:, 0] * q[:, 3] + q[:, 1] * q[:, 2]),
-        1.0 - 2.0 * (q[:, 2] ** 2 + q[:, 3] ** 2),
-    )
-    delta_yaw = wrap_to_pi(parkour_event.target_yaw - yaw).unsqueeze(-1)
-    delta_next_yaw = wrap_to_pi(parkour_event.next_target_yaw - yaw).unsqueeze(-1)
 
     return torch.cat(
         (
@@ -204,8 +193,6 @@ def pie_proprioception(
             asset.data.joint_pos - asset.data.default_joint_pos,
             asset.data.joint_vel * PIE_JOINT_VEL_SCALE,
             previous_action,
-            delta_yaw,
-            delta_next_yaw,
         ),
         dim=-1,
     ).to(env.device)
@@ -447,8 +434,8 @@ def pie_critic_observation(
 ) -> torch.Tensor:
     """PIE privileged critic observation aligned with the Teacher critic.
 
-    Layout (211 dims total for default Go2 setup):
-        - proprioception            (47)  shared with actor (delta_yaw included)
+    Layout (209 dims total for default Go2 setup):
+        - proprioception            (45)  shared with actor (delta_yaw removed)
         - base_velocity             ( 3)  ground-truth root linear velocity
         - height_scan               (132) ground-truth ray-cast heightmap
         - priv_latent.mass_params   (  4) base mass (1) + COM offset (3)

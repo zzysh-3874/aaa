@@ -957,6 +957,19 @@ class UnitreeGo2PIEFullParkourFrontFastStage2STARTSparseEnvCfg(
         # resume sees the same curriculum it was trained on.
         # (No parkour_gap.gap_size override here on purpose.)
 
+        # Force every sub-terrain onto a STRAIGHT centre-line course: zero the
+        # lateral goal/obstacle offset (y_range) so waypoints and gaps/hurdles
+        # are aligned along +x. This removes the turning sub-task so the policy
+        # only has to learn "walk straight + clear the obstacle", isolating the
+        # gait/traversal problem from navigation. We use (0.0, 0.1) rather than
+        # (0.0, 0.0) because the terrain generator does np.random.randint(low,
+        # high) which rejects an empty range; at horizontal_scale this still
+        # discretises to a single y-bin = 0, i.e. dead-centre.
+        for _name, _sub in gen.sub_terrains.items():
+            if hasattr(_sub, "y_range") and isinstance(getattr(_sub, "y_range"), tuple):
+                _sub.y_range = (0.0, 0.1)
+
+
 
 def _swap_to_foot_heightmap_target(env_cfg) -> None:
     """Swap the estimator ``foot_clearance`` obs term to the 36-dim per-foot
