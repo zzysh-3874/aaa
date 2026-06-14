@@ -1013,9 +1013,31 @@ class UnitreeGo2PIEFullParkourFrontFastStage2STARTSparseFootHmapEnvCfg(
 
 
 @configclass
-class UnitreeGo2PIEFullParkourFrontFastStage2PlayEnvCfg(
-    UnitreeGo2PIEFullParkourFrontFastStage2EnvCfg
+class UnitreeGo2PIEFullParkourFrontFastStage2STARTSparseFootHmapGapOnlyEnvCfg(
+    UnitreeGo2PIEFullParkourFrontFastStage2STARTSparseFootHmapEnvCfg
 ):
+    """Gap-ONLY variant of the STARTSparse FootHmap env.
+
+    Identical to ``...STARTSparseFootHmapEnvCfg`` (START-form rewards, slope
+    removed, straightened terrain, 36-dim per-foot heightmap target) except the
+    terrain mix is collapsed to a single sub-terrain: ``parkour_gap`` at
+    proportion 1.0, every other sub-terrain at 0.0. This isolates the gap-
+    traversal skill so the policy is not splitting gradient across hurdle / step
+    / beam at the same time.
+
+    The 15-row difficulty ramp and straight centre-line layout are inherited, so
+    the curriculum still ramps gap width from easy (row 0) to hard (row 14) and
+    the forward-distance move_up/move_down promotion is unchanged.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        gen = self.scene.terrain.terrain_generator
+        if gen is None:
+            return
+        # Collapse to gap-only: parkour_gap 1.0, everything else 0.0.
+        for _name in gen.sub_terrains:
+            gen.sub_terrains[_name].proportion = 1.0 if _name == "parkour_gap" else 0.0
     """PLAY-ONLY variant: relaxed termination + spawn directly on hard terrain.
 
     Identical to the training env (same curriculum shaping, rewards, network)

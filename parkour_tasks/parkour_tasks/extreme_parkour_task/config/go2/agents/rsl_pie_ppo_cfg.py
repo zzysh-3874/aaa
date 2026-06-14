@@ -723,6 +723,17 @@ class UnitreeGo2PIESTARTFootHmapLowAdaStage2PPORunnerCfg(UnitreeGo2PIESTARTFootH
 
 
 @configclass
+class UnitreeGo2PIESTARTFootHmapLowAdaGapOnlyStage2PPORunnerCfg(
+    UnitreeGo2PIESTARTFootHmapLowAdaStage2PPORunnerCfg
+):
+    """Gap-only START Stage-2 FootHmap runner: same as the LowAda Stage-2 runner
+    but checkpoints every 500 iters (vs the inherited 2000) so the early
+    gap-traversal learning curve can be inspected frequently."""
+
+    save_interval = 500
+
+
+@configclass
 class UnitreeGo2PIESTARTFootHmapLowAdaFlatWarmupPPORunnerCfg(
     UnitreeGo2PIESTARTFootHmapFlatWarmupPPORunnerCfg
 ):

@@ -597,3 +597,17 @@ gym.register(
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_pie_ppo_cfg:UnitreeGo2PIESTARTFootHmapLowAdaStage2PPORunnerCfg",
     },
 )
+
+# Gap-ONLY variant of the START-sparse FootHmap task: identical env / network /
+# rewards but the terrain mix is collapsed to parkour_gap (proportion 1.0).
+# Paired with a runner that checkpoints every 500 iters. Use this to isolate the
+# gap-traversal skill from the rest of the obstacle mix.
+gym.register(
+    id="Isaac-PIE-FullParkour-START-FootHmap-Sparse-Stage2-GapOnly-Unitree-Go2-v0",
+    entry_point="parkour_isaaclab.envs:ParkourManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.parkour_pie_cfg:UnitreeGo2PIEFullParkourFrontFastStage2STARTSparseFootHmapGapOnlyEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_pie_ppo_cfg:UnitreeGo2PIESTARTFootHmapLowAdaGapOnlyStage2PPORunnerCfg",
+    },
+)
