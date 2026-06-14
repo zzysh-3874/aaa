@@ -800,6 +800,32 @@ class FlatStageOneStage2STARTAlignedRewardsCfg(FlatStageOneStage2RewardsCfg):
             "std": 0.25,
         },
     )
+    # Anti-knee-walk penalty (single-variable fix for the "TensorBoard good,
+    # play bad" gap). The policy was reward-hacking with a degenerate knee-walk:
+    # body dropped low, shuffling forward on its calves. It collected full
+    # tracking_goal_vel + goal_reached while paying ~0 orientation / lin_vel_z
+    # (a low body barely tilts/bobs) and ZERO collision penalty (.*_calf was
+    # dropped from reward_collision during the v5 finetune so calf contact on
+    # hurdle/step tops is free). This term re-charges calf ground contact, but
+    # gated by terrain-relative base height: it only fires when the body is
+    # crawling below 0.26 m. A calf brushing an obstacle top happens at normal
+    # walking height (~0.30 m) so the v5 fix is preserved, while the knee-walk
+    # gait (body permanently low) is penalised on EVERY terrain tile (a
+    # terrain-name gate would miss knee-walkers on gap/hurdle/step tiles since
+    # each env stays on one tile per episode). -1.0 per contacting calf per step
+    # makes crawling net-negative without touching a normal trot (whose calves
+    # never reach the ground).
+    reward_calf_contact_crawl = RewTerm(
+        func=rewards.reward_calf_contact_flat_only,
+        weight=-1.0,
+        params={
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_calf"),
+            "asset_cfg": SceneEntityCfg("robot"),
+            "height_sensor_cfg": SceneEntityCfg("height_scanner"),
+            "crawl_height": 0.26,
+            "force_threshold": 1.0,
+        },
+    )
 
 
 @configclass

@@ -747,6 +747,52 @@ def reward_collision(
     return torch.sum(1.*(torch.norm(net_contact_forces, dim=-1) > 0.1), dim=1)
 
 
+def reward_calf_contact_flat_only(
+    env: ParkourManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    height_sensor_cfg: SceneEntityCfg = SceneEntityCfg("height_scanner"),
+    crawl_height: float = 0.26,
+    force_threshold: float = 1.0,
+) -> torch.Tensor:
+    """Anti-knee-walk penalty: count calf (lower-leg) ground contacts, gated to
+    frames where the body is CRAWLING low.
+
+    Closes the reward-hack hole left when ``.*_calf`` was dropped from
+    ``reward_collision`` (so calf contact on hurdle / step tops is unpenalised).
+    The unintended consequence was a degenerate "knee-walk": the policy drops
+    its body low and shuffles forward on its calves, collecting full
+    ``tracking_goal_vel`` / ``goal_reached`` reward while paying ~0 orientation /
+    lin_vel_z (a low body barely tilts or bobs) and zero collision penalty
+    (calf excluded). TensorBoard terrain_level / how_far climb while a real-robot
+    play session shows the dog crawling on its knees.
+
+    The penalty is gated by terrain-relative base height: it only fires when the
+    body is below ``crawl_height`` (a crouch low enough that calves are bearing
+    weight). This preserves the v5 finetune fix -- a calf brushing an obstacle
+    top happens with the body at normal walking height (~0.30 m), so it is NOT
+    penalised -- while the knee-walk gait (body permanently low) is charged on
+    every terrain, not just the dedicated flat tiles. Gating by height rather
+    than terrain type is essential because each env stays on one terrain TILE
+    per episode, so a terrain-name gate would miss knee-walkers assigned to
+    gap / hurdle / step tiles.
+
+    Returns the per-env count of calf bodies in contact (force > threshold),
+    zeroed whenever the body is above ``crawl_height``. Use a negative weight.
+    """
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    net_contact_forces = contact_sensor.data.net_forces_w_history[:, 0, sensor_cfg.body_ids]
+    count = torch.sum(1.0 * (torch.norm(net_contact_forces, dim=-1) > force_threshold), dim=1)
+    # Terrain-relative base height (same convention as reward_base_height_below_target).
+    asset: Articulation = env.scene[asset_cfg.name]
+    ray_sensor = env.scene.sensors[height_sensor_cfg.name]
+    terrain_z = torch.median(ray_sensor.data.ray_hits_w[..., 2], dim=1).values
+    terrain_z = torch.nan_to_num(terrain_z, nan=0.0, posinf=0.0, neginf=0.0)
+    base_height = asset.data.root_state_w[:, 2] - terrain_z
+    is_crawling = (base_height < crawl_height).float()
+    return count * is_crawling
+
+
 def reward_contact_force_above_threshold(
     env: ParkourManagerBasedRLEnv,
     sensor_cfg: SceneEntityCfg,
