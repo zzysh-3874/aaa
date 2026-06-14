@@ -28,7 +28,7 @@ def build(**over):
         proprio_dim=45,
         proprio_history_len=10,
         z_m_dim=64,
-        latent_dim=32,
+        latent_dim=16,
         foot_height_dim=36,
         height_dim=132,
         use_height_refine=True,
@@ -57,7 +57,7 @@ def main():
     assert out["v_hat"].shape == (B, 3), out["v_hat"].shape
     assert out["h_f_hat"].shape == (B, 36), out["h_f_hat"].shape
     assert out["z_m"].shape == (B, 64), out["z_m"].shape
-    assert out["z_mu"].shape == (B, 32), out["z_mu"].shape
+    assert out["z_mu"].shape == (B, 16), out["z_mu"].shape
     assert out["height_hat"].shape == (B, 132), out["height_hat"].shape
     assert out["rnn_hidden"].shape == (2, B, est.gru_hidden_dim), out["rnn_hidden"].shape
     print("[OK] shapes correct; hidden round-trips as (2,B,H)")

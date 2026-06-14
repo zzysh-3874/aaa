@@ -340,6 +340,13 @@ class ParkourRslRlPIEHighCapEstimatorCfg(ParkourRslRlPIEEstimatorCfg):
     """High-capacity PIE estimator: bigger terrain latent + finer depth map."""
 
     z_m_dim: int = 64
+    # VAE implicit latent z_mu/z dim. Aligned to DreamWaQ's 16-dim context
+    # latent (Nahrendra et al. 2023): audits showed z_mu was near-collapsed
+    # (KL~0, |z_mu|~0.01) at 32 dims, i.e. half the capacity was unused and
+    # diluted the actor input. 16 matches the reference and trims the actor
+    # obs accordingly (z_m terrain code stays 64 -- that's the START heightmap
+    # encoding, a separate design axis).
+    latent_dim: int = 16
     depth_feature_map_shape: tuple[int, int] = (8, 12)
     height_decoder_hidden_dims: tuple[int, ...] = (256, 128)
     # h_f lowered 2.0 -> 1.0 and v raised 1.0 -> 1.5: the model_21750 audit
@@ -623,7 +630,7 @@ class ParkourRslRlPIESTARTFootHmapFlatWarmupEstimatorCfg(ParkourRslRlPIESTARTFla
 class ParkourRslRlPIESTARTFootHmapActorCriticCfg(ParkourRslRlPIEHighCapNoiseCapActorCriticCfg):
     """Actor for the per-foot heightmap variant: h_f=36 widens input to 182."""
 
-    num_actor_obs: int = 180
+    num_actor_obs: int = 164
 
 
 @configclass
