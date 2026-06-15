@@ -69,6 +69,15 @@ parser.add_argument(
     help="PLAY-ONLY: set max_init_terrain_level so robots spawn across rows 0..N (e.g. 6) on the "
     "hard terrain the policy trained up to, instead of all starting at easy level 0.",
 )
+parser.add_argument(
+    "--play_use_gt_heightmap",
+    action="store_true",
+    default=False,
+    help="PLAY-ONLY DIAGNOSTIC: force the actor's terrain code z_m to be encoded from the "
+    "GROUND-TRUTH height scan (AdaSmpl prob=1.0) instead of the depth reconstruction. Use to "
+    "isolate whether a bad gait is a PERCEPTION problem (good with GT, bad with reconstruction) "
+    "or a POLICY/reward problem (bad even with GT). NOT representable on a real robot.",
+)
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
 # append AppLauncher cli args
@@ -237,6 +246,17 @@ def main():
         if use_pie_inference:
             policy = ppo_runner.get_pie_inference_policy(device=env.unwrapped.device, inference_noise_std=args_cli.inference_noise_std)
             print("[INFO] Using PIE actor inference wrapper with obs_dict depth/proprioception features.")
+            if args_cli.play_use_gt_heightmap:
+                # DIAGNOSTIC: force z_m to encode the ground-truth height scan
+                # (AdaSmpl prob=1.0) instead of the depth reconstruction. Lets us
+                # see whether a bad gait is perception-limited (good here) or a
+                # policy/reward problem (bad even with perfect terrain input).
+                if getattr(ppo_runner.alg.estimator, "heightmap_encoder", None) is None:
+                    print("[PLAY][WARN] estimator has no heightmap_encoder; --play_use_gt_heightmap has no effect.")
+                else:
+                    ppo_runner.alg.pie_use_adasmpl = True
+                    ppo_runner.alg.pie_adasmpl_prob = 1.0
+                    print("[PLAY] GT heightmap forced into z_m (pie_adasmpl_prob=1.0). NOT real-robot representable.")
         else:
             policy = ppo_runner.get_inference_policy(device=env.unwrapped.device)
             policy_nn = ppo_runner.alg.policy

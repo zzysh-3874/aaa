@@ -163,7 +163,10 @@ class ParkourEvent(ParkourTerm):
                     torch.tensor((self.terrain.cfg.terrain_generator.size[1] + \
                                   self._reset_offset, 0)).to(self.device)
 
-        self.dis_to_start_pos = torch.norm(start_pos - self.robot.data.root_pos_w[:, :2], dim=1)
+        # Forward (+x course-direction) progress, consistent with the curriculum
+        # metric in _resample_command (Euclidean norm replaced so that dodging a
+        # gap sideways no longer counts as progress). Feeds how_far_from_start.
+        self.dis_to_start_pos = (self.robot.data.root_pos_w[:, 0] - start_pos[:, 0]).abs()
 
     def _resample_command(self, env_ids: Sequence[int]):
         ## we are use reset_root_state events for initalize robot position in a subterrain
@@ -173,7 +176,16 @@ class ParkourEvent(ParkourTerm):
                     torch.tensor((self.terrain.cfg.terrain_generator.size[1] + \
                                   self._reset_offset, 0)).to(self.device)
 
-        self.dis_to_start_pos = torch.norm(start_pos - self.robot.data.root_pos_w[env_ids, :2], dim=1)
+        # Curriculum progress metric: use the FORWARD (+x course-direction)
+        # displacement from the start, NOT the Euclidean distance. The upstream
+        # used torch.norm(dx, dy), which on this STRAIGHTENED gap terrain lets a
+        # robot that DODGES a gap (veers sideways in y) inflate the distance and
+        # promote terrain level without ever crossing the gap -- exactly the
+        # "sees the gap and turns away" behaviour seen in play, with terrain_level
+        # climbing on fake progress. start_pos is offset only in -x, so the x
+        # component of (robot - start) is the along-course forward progress.
+        forward_progress = (self.robot.data.root_pos_w[env_ids, 0] - start_pos[:, 0]).abs()
+        self.dis_to_start_pos = forward_progress
         threshold = self.env.command_manager.get_command("base_velocity")[env_ids, 0] * self.episode_length_s
         move_up = self.dis_to_start_pos > 0.8*threshold
         move_down = self.dis_to_start_pos < 0.4*threshold
