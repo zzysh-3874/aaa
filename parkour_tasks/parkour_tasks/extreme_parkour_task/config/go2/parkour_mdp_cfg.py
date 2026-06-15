@@ -688,11 +688,16 @@ class FlatStageOneStage2STARTAlignedRewardsCfg(FlatStageOneStage2RewardsCfg):
 
     reward_dof_error = RewTerm(
         func=rewards.reward_dof_error,
-        weight=-0.01,
+        weight=-0.04,
         params={
             "asset_cfg": SceneEntityCfg("robot"),
         },
     )
+    # Removed: dof_pos_limits (-2.0) deleted to match the upstream Teacher
+    # baseline (which has no soft-joint-limit penalty). The Go2 default pose +
+    # action clip already keep joints within range, so this term mostly added
+    # noise.
+    reward_dof_pos_limits = None
     reward_lin_vel_z = RewTerm(
         func=rewards.reward_lin_vel_z_jump_aware,
         weight=-2.0,
@@ -748,18 +753,17 @@ class FlatStageOneStage2STARTAlignedRewardsCfg(FlatStageOneStage2RewardsCfg):
             "target_height": -0.18,
         },
     )
-    # Halve the feet-air-time reward 0.2 -> 0.1: play showed the policy lifts its
-    # legs too high and stays airborne too long even on flat ground, because
-    # this term rewards long swing time everywhere (not just on obstacles).
-    # Lowering the weight keeps a mild anti-drag incentive without inflating an
-    # exaggerated high-stepping gait on flat terrain.
-    reward_feet_air_time = RewTerm(
-        func=rewards.reward_feet_air_time,
-        weight=0.2,
+    # Removed: feet_air_time (+0.2) deleted to match the upstream extreme_parkour
+    # Teacher baseline (which has no air-time bonus). It rewarded long swing time
+    # everywhere and inflated an exaggerated high-step gait on flat ground.
+    reward_feet_air_time = None
+    # Align action_rate to the upstream Teacher form: norm(Δ raw_action) at
+    # -0.1 (the parent FlatStageOne had swapped it to sum(square) at -0.01).
+    reward_action_rate = RewTerm(
+        func=rewards.reward_action_rate,
+        weight=-0.1,
         params={
-            "command_name": "base_velocity",
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot"),
-            "threshold": 0.15,
+            "asset_cfg": SceneEntityCfg("robot"),
         },
     )
     # Raise the action-jerk (2nd-order action difference) penalty -0.01 ->
@@ -818,34 +822,22 @@ class FlatStageOneStage2STARTAlignedRewardsCfg(FlatStageOneStage2RewardsCfg):
     # gait (body permanently low) is penalised on EVERY terrain tile (a
     # terrain-name gate would miss knee-walkers on gap/hurdle/step tiles since
     # each env stays on one tile per episode). -1.0 per contacting calf per step
-    # makes crawling net-negative without touching a normal trot (whose calves
-    # never reach the ground).
-    reward_calf_contact_crawl = RewTerm(
-        func=rewards.reward_calf_contact_flat_only,
-        weight=-1.0,
+    # Restore the UPSTREAM extreme_parkour Teacher collision penalty WITH calf
+    # (-10.0, bodies base/hip/thigh/calf/head). The v5 finetune had dropped
+    # .*_calf so calf contact on obstacle tops was free -- but that opened the
+    # door to the knee-walk / 3-leg reward hack (calf bears weight, unpenalised).
+    # Bringing calf back is the upstream baseline's built-in anti-knee-walk
+    # signal; it makes the dedicated calf_contact_crawl + strengthened
+    # power_distribution patches redundant, so both are removed (the latter
+    # reverts to the inherited -1e-5).
+    reward_collision = RewTerm(
+        func=rewards.reward_collision,
+        weight=-10.0,
         params={
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_calf"),
-            "asset_cfg": SceneEntityCfg("robot"),
-            "height_sensor_cfg": SceneEntityCfg("height_scanner"),
-            "crawl_height": 0.26,
-            "force_threshold": 1.0,
-        },
-    )
-    # Strengthen the cross-motor power-dispersion penalty 10x (-1e-5 -> -1e-4).
-    # The inherited -1e-5 produced an effective penalty of only ~-0.004/step,
-    # which a 3-leg gait (one leg permanently suspended -> 3 zero-power joints +
-    # 9 high-power joints -> huge Var_i(|tau*qdot|)) does not feel against the
-    # +1.35 forward reward. Audit + play showed the policy converging to exactly
-    # that 3-leg gait on easy gaps. At -1e-4 the effective penalty rises to
-    # ~-0.04/step (same order as dof_acc -0.089), enough to make a suspended-leg
-    # gait net-negative while a balanced trot (roughly equal motor power across
-    # the four legs) is barely touched. Single-variable change vs the previous
-    # run; if a 3-leg gait persists, raise toward -2e-4.
-    reward_power_distribution = RewTerm(
-        func=rewards.reward_power_distribution,
-        weight=-1.0e-4,
-        params={
-            "asset_cfg": SceneEntityCfg("robot"),
+            "sensor_cfg": SceneEntityCfg(
+                "contact_forces",
+                body_names=["base", ".*_hip", ".*_thigh", ".*_calf", "Head_upper", "Head_lower"],
+            ),
         },
     )
     # Align the yaw reward to START Table I (arXiv 2512.13153):
