@@ -1039,6 +1039,16 @@ class UnitreeGo2PIEFullParkourFrontFastStage2STARTSparseFootHmapGapOnlyEnvCfg(
         for _name in gen.sub_terrains:
             gen.sub_terrains[_name].proportion = 1.0 if _name == "parkour_gap" else 0.0
 
+        # Enlarge the flat platform BETWEEN consecutive gaps so a from-scratch
+        # Go2 has room to land, stabilise, and set up an approach for the next
+        # gap instead of facing back-to-back gaps with no recovery space.
+        # x_range is the centre-to-centre gap spacing minus the gap, i.e. the
+        # flat run between gap edges. Default (0.8, 1.5) m ~= 2-4 body lengths;
+        # raise to (1.5, 2.5) m ~= 4-6 body lengths of recover-and-approach room.
+        gap = gen.sub_terrains.get("parkour_gap")
+        if gap is not None:
+            gap.x_range = (1.5, 2.5)
+
 
 @configclass
 class UnitreeGo2PIEFullParkourFrontFastStage2PlayEnvCfg(
