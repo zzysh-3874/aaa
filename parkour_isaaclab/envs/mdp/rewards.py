@@ -179,6 +179,92 @@ def reward_feet_clearance_stairs(
     return reward.sum(dim=-1)
 
 
+def reward_foot_clearance_positive(
+    env: ParkourManagerBasedRLEnv,
+    foot_sensor_names: tuple[str, str, str, str] = (
+        "foot_scanner_fl",
+        "foot_scanner_fr",
+        "foot_scanner_rl",
+        "foot_scanner_rr",
+    ),
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", body_names=".*_foot"),
+    target_clearance: float = 0.08,
+    tracking_sigma: float = 0.01,
+) -> torch.Tensor:
+    """go2_ts_depth-style POSITIVE swing-foot clearance reward (exp form).
+
+    For each foot, the clearance is measured relative to the terrain DIRECTLY
+    UNDER the foot (per-foot ray caster), so when a foot is over a gap the
+    "terrain under it" is the gap floor and the reward pushes the foot to lift
+    higher to clear the gap. Weighted by the foot's lateral (xy) speed so only
+    SWING feet are shaped (stance feet have ~0 lateral speed):
+
+        err = Σ_foot |v_xy_foot| * (foot_z - terrain_z_under_foot - target)^2
+        r   = exp(-err / sigma)
+
+    This is the reward go2_ts_depth uses to TEACH the robot to pick its feet up
+    to cross gaps/obstacles, rather than the negative DreamWaQ body-frame
+    foot_clearance penalty (which only mildly discourages dragging). Positive
+    weight; reward in (0, 1].
+    """
+    from isaaclab.sensors import RayCaster
+
+    asset: Articulation = env.scene[asset_cfg.name]
+    foot_ids = asset_cfg.body_ids
+    foot_vel_w = asset.data.body_state_w[:, foot_ids, 7:10]  # (B, 4, 3)
+    v_xy = torch.norm(foot_vel_w[..., :2], dim=-1)  # (B, 4)
+
+    clearances = []
+    for name in foot_sensor_names:
+        ray: RayCaster = env.scene.sensors[name]
+        foot_z = ray.data.pos_w[:, 2]
+        terrain_z = ray.data.ray_hits_w[:, 0, 2]
+        clearances.append(foot_z - terrain_z)
+    clearance = torch.stack(clearances, dim=-1)  # (B, 4)
+
+    err = torch.sum(v_xy * torch.square(clearance - target_clearance), dim=-1)
+    return torch.exp(-err / tracking_sigma)
+
+
+def reward_tracking_lin_vel_heading_gated(
+    env: ParkourManagerBasedRLEnv,
+    parkour_name: str = "base_parkour",
+    command_name: str = "base_velocity",
+    std: float = 0.25,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    y_error_weight: float = 2.0,
+) -> torch.Tensor:
+    """START linear-velocity tracking gated by a heading coefficient + doubled
+    lateral-error weight (go2_ts_depth design).
+
+        heading_coef = (1 + cos(yaw - target_yaw)) / 2     # 1 facing goal, 0 facing away
+        err = (v_x - v_cmd)^2 + y_error_weight*(v_y)^2
+        r   = exp(-err / std) * heading_coef
+
+    The heading_coef makes the forward-velocity reward collapse toward 0 when
+    the robot faces away from the course direction, so STEERING AROUND a gap
+    (which requires turning off-course) no longer pays -- directly countering
+    the observed "sees the gap and turns away" behaviour. The doubled v_y error
+    further suppresses the sideways drift that a dodge produces. target_yaw is
+    the parkour event's heading to the current goal (~0 on the straightened
+    centre-line course, i.e. "face +x").
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    parkour_event: ParkourEvent = env.parkour_manager.get_term(parkour_name)
+    command = env.command_manager.get_command(command_name)
+    v_cmd = command[:, 0]
+    v_b = asset.data.root_lin_vel_b
+    # Heading error to the current goal direction (target_yaw is in world frame,
+    # robot yaw from quat).
+    q = asset.data.root_quat_w
+    yaw = torch.atan2(2 * (q[:, 0] * q[:, 3] + q[:, 1] * q[:, 2]),
+                      1 - 2 * (q[:, 2] ** 2 + q[:, 3] ** 2))
+    heading_error = wrap_to_pi(parkour_event.target_yaw - yaw)
+    heading_coef = (1.0 + torch.cos(heading_error)) / 2.0
+    err = torch.square(v_b[:, 0] - v_cmd) + y_error_weight * torch.square(v_b[:, 1])
+    return torch.exp(-err / std) * heading_coef
+
+
 def reward_stand_still(
     env: ParkourManagerBasedRLEnv,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),

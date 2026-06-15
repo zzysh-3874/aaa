@@ -735,22 +735,19 @@ class FlatStageOneStage2STARTAlignedRewardsCfg(FlatStageOneStage2RewardsCfg):
     # check (dis_to_start), which is how START itself prevents loafing without a
     # goal bonus.
     reward_goal_reached = None
-    # Re-enable the DreamWaQ foot-clearance swing-arc penalty at -0.0075 (was
-    # removed for START alignment, but play showed the policy "rams into the
-    # step without lifting its feet" -- it never learned to pick its legs up
-    # over obstacles). This term penalises a swing foot whose body-frame height
-    # is above the target while it has lateral velocity:
-    # (foot_z_body - target)^2 * |foot_v_xy| summed over 4 feet -> encourages a
-    # clean lift-and-swing arc and discourages dragging / shuffling into risers.
-    # Weight -0.005 (DreamWaQ default is -0.01; using a gentler -0.005 so the
-    # leg-lift incentive helps clear hurdles/steps without over-penalising the
-    # swing arc and making the gait stiff).
+    # go2_ts_depth-style POSITIVE swing-foot clearance reward (exp), relative to
+    # the terrain UNDER each foot. Replaces the negative DreamWaQ body-frame
+    # foot_clearance penalty: instead of mildly discouraging foot drag, this
+    # actively TEACHES the robot to lift its swing feet to clear the gap (when a
+    # foot is over a gap, the terrain under it is the gap floor, so the reward
+    # pushes the foot higher). +0.2 weight, target 0.08 m above terrain.
     reward_foot_clearance = RewTerm(
-        func=rewards.reward_foot_clearance,
-        weight=-0.01,
+        func=rewards.reward_foot_clearance_positive,
+        weight=0.2,
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot"),
-            "target_height": -0.18,
+            "target_clearance": 0.08,
+            "tracking_sigma": 0.01,
         },
     )
     # Removed: feet_air_time (+0.2) deleted to match the upstream extreme_parkour
@@ -800,13 +797,22 @@ class FlatStageOneStage2STARTAlignedRewardsCfg(FlatStageOneStage2RewardsCfg):
     # direction is ~+x, so the projection is ~v_x anyway; this makes the reward
     # exactly the paper's body-frame form and decouples it from waypoint
     # geometry. std=0.25 follows the paper.
+    # go2_ts_depth-style heading-gated velocity tracking (replaces the plain
+    # body-frame v_x form). reward = exp(-[(v_x-v_cmd)^2 + 2*v_y^2]/0.25) *
+    # (1+cos(yaw_err))/2. The heading_coef collapses the forward reward toward 0
+    # when the robot faces away from the course direction, so steering AROUND a
+    # gap (which needs turning off-course) stops paying -- directly countering
+    # the "sees the gap and turns away" behaviour. Doubled v_y error suppresses
+    # the sideways drift of a dodge.
     reward_tracking_goal_vel = RewTerm(
-        func=rewards.reward_tracking_lin_vel_paper,
+        func=rewards.reward_tracking_lin_vel_heading_gated,
         weight=1.5,
         params={
             "asset_cfg": SceneEntityCfg("robot"),
+            "parkour_name": "base_parkour",
             "command_name": "base_velocity",
             "std": 0.25,
+            "y_error_weight": 2.0,
         },
     )
     # Anti-knee-walk penalty (single-variable fix for the "TensorBoard good,

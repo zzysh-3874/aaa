@@ -2,6 +2,7 @@ from isaaclab.utils import configclass
 from isaaclab.sensors import RayCasterCfg, patterns
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import SceneEntityCfg
+from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.envs.mdp import events as isaac_events
 
 from parkour_isaaclab.envs.mdp import parkour_commands
@@ -1048,6 +1049,25 @@ class UnitreeGo2PIEFullParkourFrontFastStage2STARTSparseFootHmapGapOnlyEnvCfg(
         gap = gen.sub_terrains.get("parkour_gap")
         if gap is not None:
             gap.x_range = (1.5, 2.5)
+
+        # SOFT termination (go2_ts_depth design): a posture/low-height failure
+        # must persist 5 consecutive steps before reset, so the robot can
+        # stumble at a gap edge and recover instead of being reset on the first
+        # mis-step. This stops it learning to AVOID gaps (instant reset on a
+        # mis-step = total reward loss = learn to steer around). A true fall into
+        # the pit (root_z < -0.25) still terminates immediately.
+        from parkour_isaaclab.envs.mdp import terminations as _term
+        self.terminations.total_terminates = DoneTerm(
+            func=_term.terminate_episode_soft,
+            time_out=True,
+            params={
+                "asset_cfg": SceneEntityCfg("robot"),
+                "max_roll": 1.0,
+                "max_pitch": 1.4,
+                "minimum_height": 0.20,
+                "fail_to_terminal_steps": 5,
+            },
+        )
 
 
 @configclass
