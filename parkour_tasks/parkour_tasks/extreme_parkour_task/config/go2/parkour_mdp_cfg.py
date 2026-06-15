@@ -831,6 +831,23 @@ class FlatStageOneStage2STARTAlignedRewardsCfg(FlatStageOneStage2RewardsCfg):
             "force_threshold": 1.0,
         },
     )
+    # Strengthen the cross-motor power-dispersion penalty 10x (-1e-5 -> -1e-4).
+    # The inherited -1e-5 produced an effective penalty of only ~-0.004/step,
+    # which a 3-leg gait (one leg permanently suspended -> 3 zero-power joints +
+    # 9 high-power joints -> huge Var_i(|tau*qdot|)) does not feel against the
+    # +1.35 forward reward. Audit + play showed the policy converging to exactly
+    # that 3-leg gait on easy gaps. At -1e-4 the effective penalty rises to
+    # ~-0.04/step (same order as dof_acc -0.089), enough to make a suspended-leg
+    # gait net-negative while a balanced trot (roughly equal motor power across
+    # the four legs) is barely touched. Single-variable change vs the previous
+    # run; if a 3-leg gait persists, raise toward -2e-4.
+    reward_power_distribution = RewTerm(
+        func=rewards.reward_power_distribution,
+        weight=-1.0e-4,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+        },
+    )
     # Align the yaw reward to START Table I (arXiv 2512.13153):
     #   Ang. vel. tracking = exp(-||w_yaw - w_yaw_cmd||^2 / 0.25), weight 0.5.
     # The inherited Teacher ``reward_tracking_yaw`` tracks the absolute HEADING
