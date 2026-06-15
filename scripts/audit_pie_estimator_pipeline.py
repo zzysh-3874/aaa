@@ -731,6 +731,10 @@ def print_summary(stats: EstimatorStats, runner: OnPolicyRunnerWithExtractor) ->
     emit("\n=== INTERNAL ABLATION HEAD RMS ===")
     emit("mode                 | z_mu    | z_m     | v_hat   | h_f_hat")
     for mode in ("zero_cross_attention", "zero_gru_hidden", "highway_f_only", "highway_gru_only"):
+        if f"{mode}_z_mu" not in stats.internal_head_ablation_sq:
+            # Separated TR-Net (and other architectures without the single-GRU
+            # highway path) do not populate these internal ablation modes.
+            continue
         emit(
             f"{mode:<20} | "
             f"{(stats.internal_head_ablation_sq[f'{mode}_z_mu'] / denom) ** 0.5:7.5f} | "
