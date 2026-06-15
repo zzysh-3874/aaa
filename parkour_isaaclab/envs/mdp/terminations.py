@@ -55,16 +55,19 @@ def terminate_episode(
 
 class terminate_episode_soft(ManagerTermBase):
     """go2_ts_depth-style SOFT termination: a failure condition (roll / pitch /
-    too-low) must PERSIST for ``fail_to_terminal_steps`` consecutive steps before
-    the episode is reset, instead of resetting on the first frame it trips.
-    Time-out and goal-reached still terminate immediately.
+    too-low) is tolerated until the ACCUMULATED number of failed steps in the
+    episode exceeds ``fail_to_terminal_steps``, instead of resetting on the
+    first frame it trips. Time-out and goal-reached still terminate immediately.
 
     Why: hard termination teaches the robot to AVOID gaps (one mis-step into a
     gap = instant reset = total loss of future reward), so it learns to steer
-    around them. A short failure-persistence window lets the robot stumble at a
-    gap edge and RECOVER without losing the episode, encouraging it to actually
-    attempt crossings. The gap-floor ``minimum_height`` check still fires
-    immediately (a robot that has truly fallen into the pit cannot recover).
+    around them. A failure-tolerance budget lets the robot stumble at a gap edge
+    and recover without losing the episode, encouraging it to actually attempt
+    crossings. A true fall into the pit (root_z < -0.25) still fires immediately
+    (the robot cannot recover from that).
+
+    Faithful to go2_ts_depth ``check_termination`` (fail_buf += fail; reset when
+    fail_buf exceeds the tolerance); the per-episode counter is zeroed on reset.
     """
 
     def __init__(self, cfg, env: ParkourManagerBasedRLEnv):
@@ -95,9 +98,11 @@ class terminate_episode_soft(ManagerTermBase):
         fail = roll_cutoff | pitch_cutoff
         if minimum_height is not None:
             fail = fail | (asset.data.root_state_w[:, 2] < minimum_height)
-        # Accumulate consecutive-failure counter; reset to 0 when not failing.
-        self.fail_buf = torch.where(fail, self.fail_buf + 1, torch.zeros_like(self.fail_buf))
-        soft_fail = self.fail_buf >= fail_to_terminal_steps
+        # go2_ts_depth design: accumulate total failed steps over the episode
+        # (fail_buf += fail); reset when the accumulated count exceeds the
+        # tolerance. The per-episode counter is zeroed in reset().
+        self.fail_buf = self.fail_buf + fail.long()
+        soft_fail = self.fail_buf > fail_to_terminal_steps
 
         # Immediate (non-recoverable / non-failure) terminations.
         hard_floor = asset.data.root_state_w[:, 2] < -0.25  # truly fallen into a pit

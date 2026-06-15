@@ -189,23 +189,31 @@ def reward_foot_clearance_positive(
     ),
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", body_names=".*_foot"),
     target_clearance: float = 0.08,
+    foot_height_offset: float = 0.022,
     tracking_sigma: float = 0.01,
+    max_clearance: float = 0.25,
 ) -> torch.Tensor:
     """go2_ts_depth-style POSITIVE swing-foot clearance reward (exp form).
 
-    For each foot, the clearance is measured relative to the terrain DIRECTLY
-    UNDER the foot (per-foot ray caster), so when a foot is over a gap the
-    "terrain under it" is the gap floor and the reward pushes the foot to lift
-    higher to clear the gap. Weighted by the foot's lateral (xy) speed so only
-    SWING feet are shaped (stance feet have ~0 lateral speed):
+    Faithful to lupinjia/LeggedGym-Ex go2_ts_depth ``_reward_foot_clearance``:
 
-        err = Σ_foot |v_xy_foot| * (foot_z - terrain_z_under_foot - target)^2
+        clearance = foot_z - terrain_z_under_foot - target_clearance - foot_height_offset
+        err = Σ_foot |v_xy_foot| * clearance^2
         r   = exp(-err / sigma)
 
-    This is the reward go2_ts_depth uses to TEACH the robot to pick its feet up
-    to cross gaps/obstacles, rather than the negative DreamWaQ body-frame
-    foot_clearance penalty (which only mildly discourages dragging). Positive
-    weight; reward in (0, 1].
+    - ``foot_height_offset`` (0.022 m) is the height of the foot coordinate
+      origin above the contact surface (so a grounded foot reads ~0 clearance),
+      matching the reference's ``foot_height_offset``.
+    - The clearance is measured relative to the terrain DIRECTLY UNDER the foot
+      (per-foot ray caster), so a foot over a gap sees the gap floor and the
+      reward pushes it to lift higher to clear the gap.
+    - ``v_xy`` (foot lateral speed) weights the term so only SWING feet are
+      shaped; stance feet (~0 lateral speed) are unaffected.
+    - ``max_clearance`` clips the per-foot clearance. The reference takes the
+      MAX terrain height over an AREA around the foot to avoid the reward
+      jumping when the foot passes over a deep gap edge; our foot ray is a
+      single point, so instead we clip the (foot - gap_floor) clearance at
+      max_clearance to bound the same jump. Positive weight; reward in (0, 1].
     """
     from isaaclab.sensors import RayCaster
 
@@ -220,9 +228,14 @@ def reward_foot_clearance_positive(
         foot_z = ray.data.pos_w[:, 2]
         terrain_z = ray.data.ray_hits_w[:, 0, 2]
         clearances.append(foot_z - terrain_z)
-    clearance = torch.stack(clearances, dim=-1)  # (B, 4)
+    # Clip the raw foot-above-terrain clearance to bound the gap-edge jump
+    # (single-point-ray substitute for the reference's area-max).
+    clearance = torch.stack(clearances, dim=-1).clamp(max=max_clearance)  # (B, 4)
 
-    err = torch.sum(v_xy * torch.square(clearance - target_clearance), dim=-1)
+    err = torch.sum(
+        v_xy * torch.square(clearance - target_clearance - foot_height_offset),
+        dim=-1,
+    )
     return torch.exp(-err / tracking_sigma)
 
 
