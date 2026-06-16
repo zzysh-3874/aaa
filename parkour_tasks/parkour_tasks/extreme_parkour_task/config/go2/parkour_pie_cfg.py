@@ -1049,6 +1049,22 @@ class UnitreeGo2PIEFullParkourFrontFastStage2STARTSparseFootHmapGapOnlyEnvCfg(
         gap = gen.sub_terrains.get("parkour_gap")
         if gap is not None:
             gap.x_range = (1.5, 2.5)
+            # Super-smooth gap-width curriculum START so a from-scratch Go2 can
+            # bootstrap gap-crossing CONTINUOUSLY from plain walking. The
+            # inherited FrontFast knee-remapped gap_size starts at ~0.1 m even at
+            # level 0 -- already a real "step in = fall" trench, i.e. a DISCONTINUITY
+            # between "walk" and "must clear a gap". The robot can never explore a
+            # successful crossing from there (random action noise won't produce a
+            # precise leap, every attempt that touches the gap terminates, so it
+            # learns to STOP before the gap -- audits confirm perception is fine,
+            # the map is accurate; the policy just uses it to AVOID the gap).
+            # Starting at 0.02 m means level 0 is crossed by a NORMAL walking
+            # stride (foot naturally clears a 2 cm seam), so approaching the gap
+            # zone pays (forward reward) instead of terminating. Each curriculum
+            # level widens the gap a little, growing the crossing skill smoothly
+            # out of walking: 2cm -> step over -> stride over -> leap. Peak 0.42 m
+            # at difficulty 1 (~ robot body length).
+            gap.gap_size = "0.02 + 0.4 * difficulty"
 
         # SOFT termination (go2_ts_depth design): a posture/low-height failure
         # must persist 5 consecutive steps before reset, so the robot can
