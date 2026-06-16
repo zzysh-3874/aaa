@@ -741,23 +741,19 @@ class ParkourRslRlPIESTARTFootHmapLowAdaGapOnly30kEstimatorCfg(
 
 @configclass
 class ParkourRslRlPIESTARTFootHmapGapOnlyActorCriticCfg(ParkourRslRlPIESTARTFootHmapActorCriticCfg):
-    """Gap-only actor: relax the exploration-noise ceiling 0.40 -> 0.80.
+    """Gap-only actor: keep the 0.40 exploration-noise ceiling.
 
-    Diagnosis of the gap-only runs (gait healthy, robot walks right up to the
-    0.08m gap edge and STOPS, reward_goal_reached stuck at ~0.005 = it never
-    crosses): an exploration deadlock. The critic cannot learn that crossing
-    beats stopping because the policy almost never produces the large
-    leg-extension action needed to step over the gap, and our anti-runaway
-    NoiseCap (max_noise_std=0.40) was clamping exactly the wide-action
-    exploration that would discover the crossing. Raising the ceiling to 0.80
-    gives room for big-stride exploration while still keeping a hard wall well
-    below the ~0.45-runaway collapse seen on the FULL obstacle mix (gap-only is
-    a far gentler terrain, so the higher ceiling is safe here). Scoped to the
-    gap-only runner only; every other task keeps 0.40. entropy_coef is already
-    0.01 in this chain (inherited from the base PIE runner), matching the
-    go2_ts_depth reference, so it is left untouched."""
+    History: briefly raised to 0.80 to test the "NoiseCap is starving
+    exploration" hypothesis for the level-3.4 stall. That run disproved it --
+    the mean action noise std SELF-CAPPED at ~0.29 (well below even the old
+    0.40 ceiling), so the ceiling was inert and the stall persisted. The real
+    cause was the always-fatal gap depth (random (0.2,1.0) m): every mis-step
+    fell past the -0.25 hard-floor termination, so the policy never collected a
+    "crossed the gap" sample. Reverted to 0.40 so the depth-curriculum fix is
+    the single isolated variable in this run. entropy_coef stays 0.01
+    (inherited), matching go2_ts_depth."""
 
-    max_noise_std: float | None = 0.80
+    max_noise_std: float | None = 0.40
 
 
 @configclass
