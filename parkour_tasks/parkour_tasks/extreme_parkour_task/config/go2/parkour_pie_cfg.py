@@ -1079,6 +1079,12 @@ class UnitreeGo2PIEFullParkourFrontFastStage2STARTSparseFootHmapGapOnlyEnvCfg(
             # level, forcing a real step-over once the crossing gait is learned.
             # difficulty = level/9 here, so 0.38 ~= level 3.4.
             gap.gap_depth = "0.05 + 0.88 * max(difficulty - 0.38, 0.0)"
+            # Keep the LATERAL side pits deep (fixed 1.0 m) regardless of the
+            # shallow cross-path gap depth, so the robot cannot dodge sideways
+            # off the centre-line into a shallow pit to avoid jumping the gap.
+            # The gap it must cross is shallow (recoverable), but stepping OFF
+            # the path is still a real fall -> it must actually traverse.
+            gap.side_pit_depth = (1.0, 1.0)
 
         # SOFT termination (go2_ts_depth design): a posture/low-height failure
         # must persist 5 consecutive steps before reset, so the robot can

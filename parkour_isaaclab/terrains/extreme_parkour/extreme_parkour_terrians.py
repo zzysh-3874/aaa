@@ -86,6 +86,18 @@ def parkour_gap_terrain(
         height_field_raw[0:platform_len, :] = platform_height
 
         gap_depth = -round(np.random.uniform(cfg.gap_depth[0], cfg.gap_depth[1]) / cfg.vertical_scale) if not isinstance(cfg.gap_depth, str) else -round(eval(cfg.gap_depth, {"difficulty": difficulty}) / cfg.vertical_scale)
+        # Side-pit depth (the lateral trenches outside the valid corridor). Kept
+        # SEPARATE from the cross-path gap depth so the gap the robot must jump
+        # can be made shallow (recoverable mis-step, exploration unlock) WHILE
+        # the side pits stay deep -- otherwise the robot just sidesteps off the
+        # centre-line into a shallow side pit to avoid crossing the gap. None =
+        # legacy (side pits == gap depth).
+        if getattr(cfg, "side_pit_depth", None) is None:
+            side_pit_depth = gap_depth
+        elif isinstance(cfg.side_pit_depth, str):
+            side_pit_depth = -round(eval(cfg.side_pit_depth, {"difficulty": difficulty}) / cfg.vertical_scale)
+        else:
+            side_pit_depth = -round(np.random.uniform(cfg.side_pit_depth[0], cfg.side_pit_depth[1]) / cfg.vertical_scale)
         half_valid_width = round(np.random.uniform(cfg.half_valid_width[0], cfg.half_valid_width[1]) / cfg.horizontal_scale)
         goals = np.zeros((num_goals, 2))
         goal_heights = np.ones((num_goals)) * platform_height
@@ -99,8 +111,8 @@ def parkour_gap_terrain(
             if not cfg.apply_flat:
                 height_field_raw[dis_x-gap_size//2 : dis_x+gap_size//2, :] = gap_depth
 
-            height_field_raw[last_dis_x:dis_x, :mid_y+rand_y-half_valid_width] = gap_depth
-            height_field_raw[last_dis_x:dis_x, mid_y+rand_y+half_valid_width:] = gap_depth
+            height_field_raw[last_dis_x:dis_x, :mid_y+rand_y-half_valid_width] = side_pit_depth
+            height_field_raw[last_dis_x:dis_x, mid_y+rand_y+half_valid_width:] = side_pit_depth
             
             last_dis_x = dis_x
             goals[i+1] = [dis_x-rand_x//2, mid_y + rand_y]

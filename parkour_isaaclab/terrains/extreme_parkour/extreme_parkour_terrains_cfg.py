@@ -26,6 +26,11 @@ class ExtremeParkourGapTerrainCfg(ExtremeParkourRoughTerrainCfg):
     # level. This is the "soft dynamics" exploration unlock (Robot Parkour
     # Learning / Extreme Parkour).
     gap_depth: tuple[float, float] | str = (0.2, 1)
+    # Depth of the LATERAL pits outside the valid corridor (the y-edges).
+    # None = same as gap_depth (legacy). Set this DEEP (e.g. a fixed tuple)
+    # while gap_depth is a shallow curriculum string so the robot cannot
+    # sidestep off the centre-line to avoid jumping the cross-path gap.
+    side_pit_depth: tuple[float, float] | str | None = None
 
 @configclass
 class ExtremeParkourHurdleTerrainCfg(ExtremeParkourRoughTerrainCfg):
