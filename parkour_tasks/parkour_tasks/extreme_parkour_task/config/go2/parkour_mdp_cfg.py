@@ -734,7 +734,22 @@ class FlatStageOneStage2STARTAlignedRewardsCfg(FlatStageOneStage2RewardsCfg):
     # curriculum demotes loafers via the forward-distance move_up/move_down
     # check (dis_to_start), which is how START itself prevents loafing without a
     # goal bonus.
-    reward_goal_reached = None
+    # Re-enable goal_reached (+2.0). START Table I has no goal bonus and we
+    # dropped it for alignment, but play shows the robot stops ~1m BEFORE the
+    # first gap and never approaches it: on this deep-trench gap task, "stop on
+    # the safe platform and farm the dense terms for the full episode" out-values
+    # "risk crossing the gap (mis-step -> fall -> terminate -> lose the rest of
+    # the episode)". goal_reached puts a reward ON THE FAR SIDE of each gap that
+    # can ONLY be collected by actually crossing, breaking the "stall before the
+    # gap" local optimum. This is the extreme_parkour anti-stall anchor (our code
+    # base's origin); +2.0 is strong enough to beat the stall.
+    reward_goal_reached = RewTerm(
+        func=rewards.reward_goal_reached,
+        weight=2.0,
+        params={
+            "parkour_name": "base_parkour",
+        },
+    )
     # go2_ts_depth-style POSITIVE swing-foot clearance reward (exp), relative to
     # the terrain UNDER each foot. Replaces the negative DreamWaQ body-frame
     # foot_clearance penalty: instead of mildly discouraging foot drag, this
@@ -754,13 +769,19 @@ class FlatStageOneStage2STARTAlignedRewardsCfg(FlatStageOneStage2RewardsCfg):
     # Teacher baseline (which has no air-time bonus). It rewarded long swing time
     # everywhere and inflated an exaggerated high-step gait on flat ground.
     reward_feet_air_time = None
-    # Align action_rate to the upstream Teacher form: norm(Δ raw_action) at
-    # -0.1 (the parent FlatStageOne had swapped it to sum(square) at -0.01).
+    # Revert action_rate to the squared form at -0.01 (was changed to the
+    # upstream Teacher norm form @ -0.1 to "align", but that 10x-stronger
+    # action-change penalty pressed the policy into a minimal-motion 'small
+    # shuffle-step' gait and suppressed the LARGE actions needed to lift legs
+    # and cross a gap -- visible as tiny choppy steps + refusing to approach the
+    # gap). -0.01 squared is the DreamWaQ value the earlier normal-gait runs
+    # used; it keeps motion smooth without forbidding the big leg-lift a gap
+    # crossing needs.
     reward_action_rate = RewTerm(
-        func=rewards.reward_action_rate,
-        weight=-0.1,
+        func=rewards.reward_action_rate_squared,
+        weight=-0.01,
         params={
-            "asset_cfg": SceneEntityCfg("robot"),
+            "action_name": "joint_pos",
         },
     )
     # Raise the action-jerk (2nd-order action difference) penalty -0.01 ->
