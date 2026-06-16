@@ -19,7 +19,13 @@ class ExtremeParkourRoughTerrainCfg(ParkourSubTerrainBaseCfg):
 class ExtremeParkourGapTerrainCfg(ExtremeParkourRoughTerrainCfg):
     function = extreme_parkour_terrians.parkour_gap_terrain
     gap_size: str = '0.1 + 0.7*difficulty'
-    gap_depth: tuple[float, float] = (0.2, 1) 
+    # Fixed tuple = depth sampled uniformly in [lo, hi] (legacy, always fatal).
+    # A formula string "expr(difficulty)" enables a depth curriculum (set per
+    # env): shallow early so a mis-step into the gap is recoverable (body never
+    # drops past the -0.25 hard-floor termination), deepening with terrain
+    # level. This is the "soft dynamics" exploration unlock (Robot Parkour
+    # Learning / Extreme Parkour).
+    gap_depth: tuple[float, float] | str = (0.2, 1)
 
 @configclass
 class ExtremeParkourHurdleTerrainCfg(ExtremeParkourRoughTerrainCfg):

@@ -1065,6 +1065,20 @@ class UnitreeGo2PIEFullParkourFrontFastStage2STARTSparseFootHmapGapOnlyEnvCfg(
             # out of walking: 2cm -> step over -> stride over -> leap. Peak 0.42 m
             # at difficulty 1 (~ robot body length).
             gap.gap_size = "0.02 + 0.4 * difficulty"
+            # DEPTH curriculum (the real fix for the level-3.4 deadlock). The
+            # parkour_gap depth was a fixed random tuple (0.2, 1.0) m: EVERY
+            # gap at EVERY level dropped the body well past the -0.25 hard-floor
+            # termination on a mis-step, so a foot-in-slot = instant fatal reset.
+            # The policy could never collect a "stepped into the gap and
+            # recovered / crossed" sample -> goal_reached stuck ~0.004, terrain
+            # frozen at 3.4. Hold the depth at a shallow 5 cm through the stall
+            # zone (difficulty<=0.38, i.e. level<=~3.4) so a mis-step only taps
+            # a 5 cm notch (body never reaches -0.25, the soft 5-step posture
+            # budget absorbs the wobble, robot recovers and crosses). Past the
+            # stall the depth deepens to a genuinely fatal ~0.6 m by the top
+            # level, forcing a real step-over once the crossing gait is learned.
+            # difficulty = level/9 here, so 0.38 ~= level 3.4.
+            gap.gap_depth = "0.05 + 0.88 * max(difficulty - 0.38, 0.0)"
 
         # SOFT termination (go2_ts_depth design): a posture/low-height failure
         # must persist 5 consecutive steps before reset, so the robot can

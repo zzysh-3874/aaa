@@ -85,7 +85,7 @@ def parkour_gap_terrain(
         platform_height = round(cfg.platform_height / cfg.vertical_scale)
         height_field_raw[0:platform_len, :] = platform_height
 
-        gap_depth = -round(np.random.uniform(cfg.gap_depth[0], cfg.gap_depth[1]) / cfg.vertical_scale)
+        gap_depth = -round(np.random.uniform(cfg.gap_depth[0], cfg.gap_depth[1]) / cfg.vertical_scale) if not isinstance(cfg.gap_depth, str) else -round(eval(cfg.gap_depth, {"difficulty": difficulty}) / cfg.vertical_scale)
         half_valid_width = round(np.random.uniform(cfg.half_valid_width[0], cfg.half_valid_width[1]) / cfg.horizontal_scale)
         goals = np.zeros((num_goals, 2))
         goal_heights = np.ones((num_goals)) * platform_height
